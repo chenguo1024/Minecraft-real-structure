@@ -1,0 +1,340 @@
+Minecraft Real Structure 复杂建筑生成体系总结
+
+一、系统总体设计
+
+目标： 将现实建筑照片转换为 Minecraft 三维结构。
+
+推荐架构：
+
+建筑图片 ↓ 视觉模型(VLM) ↓ 建筑结构 JSON ↓ 建筑规则解析器 ↓ Minecraft
+方块生成器 ↓ .nbt/.schem 文件
+
+核心思想： AI负责理解建筑，规则系统负责生成方块。
+
+JSON结构建议：
+
+{ geometry: shape, width, length, height,
+
+roof: type, material, height,
+
+wall: pattern, material,
+
+windows: type, layout,
+
+entrance: type,
+
+style: name }
+
+================================ 一、屋顶系统 Roof
+================================
+
+1.  Flat 平顶
+
+适用： 现代建筑、工业建筑
+
+Minecraft实现： stone/concrete铺平面 边缘增加slab和wall装饰
+
+2.  Gable 人字顶
+
+适用： 住宅、中世纪建筑、教堂
+
+实现： 使用stairs逐层向上收缩。
+
+参数： slope height
+
+3.  Hip 四坡顶
+
+适用： 别墅、传统建筑
+
+实现： 四个方向同时缩小。
+
+4.  Pyramid 金字塔顶
+
+适用： 塔楼、东方建筑
+
+实现： 每层减少宽度。
+
+5.  Dome 圆顶
+
+适用： 清真寺、教堂、公共建筑
+
+实现： 球体算法： (x²+y²+z²)<r²
+
+方块： quartz、gold、copper
+
+6.  Mansard 法式折坡顶
+
+适用： 巴洛克、法式建筑
+
+实现： 两段不同坡度stairs。
+
+7.  Butterfly 蝶形屋顶
+
+适用： 现代建筑
+
+实现： 中心高度低，两侧升高。
+
+8.  Sawtooth 锯齿屋顶
+
+适用： 工厂
+
+实现： 重复三角屋顶+玻璃。
+
+9.  Barrel 桶形顶
+
+适用： 体育馆、车站
+
+实现： 半圆柱结构。
+
+10. Gothic Spire 哥特尖塔
+
+适用： 哥特教堂
+
+实现： 逐层减少尺寸。
+
+================================ 二、墙面系统 Wall
+================================
+
+1.  Plain Wall 普通墙
+
+基础墙体。
+
+2.  Pillar Wall 立柱墙
+
+实现： 墙角或墙面间隔增加柱子。
+
+3.  Pilaster 壁柱
+
+实现： 墙面突出装饰柱。
+
+4.  Buttress 扶壁
+
+适合： 哥特建筑。
+
+实现： 墙外增加支撑柱。
+
+5.  Arcade 拱廊
+
+实现： stairs/slab组合拱形结构。
+
+6.  Relief Band 浮雕带
+
+实现： 每层加入slab/stair水平线。
+
+7.  Rustication 凹凸石墙
+
+实现： stone_brick、chiseled_stone随机组合。
+
+8.  Timber Frame 木结构
+
+适合： 中世纪建筑。
+
+实现： wood log + 石墙。
+
+================================ 三、窗户系统 Window
+================================
+
+1.  Grid Window 网格窗
+
+规则： 行列排列。
+
+2.  Arch Window 拱窗
+
+实现： 顶部使用stairs形成拱形。
+
+3.  Pointed Arch 尖拱窗
+
+适合： 哥特建筑。
+
+4.  Round Window Oculus 圆窗
+
+实现： 圆形算法生成。
+
+5.  Bay Window 飘窗
+
+实现： 窗体向外突出。
+
+6.  Shutter Window 百叶窗
+
+实现： trapdoor模拟。
+
+7.  Ribbon Window 横向窗带
+
+适合： 现代建筑。
+
+实现： 连续glass pane。
+
+8.  Curtain Wall 玻璃幕墙
+
+实现： 大面积glass。
+
+================================ 四、入口系统 Entrance
+================================
+
+1.  Simple Door
+
+普通门洞。
+
+2.  Arch Entrance
+
+拱形入口。
+
+3.  Portal Entrance
+
+大型建筑入口。
+
+4.  Porch 门廊
+
+实现： 柱+顶部结构。
+
+5.  Grand Stair Entrance
+
+实现： 多级台阶。
+
+6.  Column Entrance
+
+适合： 古典建筑。
+
+实现： 柱子+门。
+
+================================ 五、建筑平面 Shape
+================================
+
+1.  Rectangle
+
+普通建筑。
+
+2.  L Shape
+
+适合： 别墅。
+
+3.  U Shape
+
+适合： 宫殿、学校。
+
+4.  T Shape
+
+行政建筑。
+
+5.  Cross Shape
+
+适合： 教堂。
+
+6.  Octagonal 八角形
+
+适合： 中式塔楼。
+
+7.  Circular 圆形
+
+适合： 体育馆。
+
+================================ 六、风格模板 Style Preset
+================================
+
+1.  Modern 现代
+
+特点： 玻璃、混凝土、平顶、大窗。
+
+参数：
+
+roof: flat
+
+wall: glass_concrete
+
+window: ribbon
+
+2.  Gothic 哥特
+
+特点： 高、尖、窄窗。
+
+参数：
+
+roof: spire
+
+wall: buttress
+
+window: pointed_arch
+
+shape: cross
+
+3.  Chinese Traditional 中式
+
+特点： 木柱、飞檐、对称。
+
+参数：
+
+roof: hip
+
+wall: pillar
+
+window: wood_lattice
+
+4.  Classical 古典
+
+特点： 柱式、拱门、三角山墙。
+
+参数：
+
+wall: column
+
+window: arch
+
+entrance: portico
+
+5.  Medieval 中世纪
+
+特点： 石墙、木梁、小窗。
+
+参数：
+
+roof: gable
+
+wall: timber_frame
+
+6.  Baroque 巴洛克
+
+特点： 复杂装饰、曲线、豪华。
+
+参数：
+
+roof: mansard
+
+wall: relief
+
+window: arch
+
+================================ 七、开发优先级
+================================
+
+V1基础版本：
+
+Shape: rectangle L cross
+
+Roof: flat gable hip dome
+
+Wall: plain pillar
+
+Window: grid arch
+
+Entrance: simple porch
+
+V2风格系统：
+
+加入：
+
+gothic chinese classical modern
+
+V3高级版本：
+
+加入：
+
+多视角建筑重建 3D Reconstruction NeRF Gaussian Splatting
+自动生成复杂外立面
+
+最终目标：
+
+AI视觉模型负责： 建筑识别
+
+规则引擎负责： Minecraft生成
+
+形成： Image → Building JSON → Minecraft World

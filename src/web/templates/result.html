@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>生成结果 - Minecraft Real Structure</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>生成完成</h1>
+    <p class="subtitle">AI 分析结果与 Minecraft 结构数据</p>
+  </header>
+
+  <main>
+    <div class="result-grid">
+      <section class="card">
+        <h2>建筑描述</h2>
+        <table class="info-table">
+          <tr><td>类型</td><td>{{ desc.building_type }}</td></tr>
+          <tr><td>风格</td><td>{{ desc.style }}</td></tr>
+          <tr><td>尺寸</td><td>{{ size_x }} × {{ size_y }} × {{ size_z }}</td></tr>
+          <tr><td>平面形状</td><td>{{ desc.shape }}</td></tr>
+          <tr><td>屋顶</td><td>{{ desc.features | selectattr("feature_type", "equalto", "roof") | map(attribute="position") | first | default("flat") }}</td></tr>
+          <tr><td>方块总数</td><td>{{ block_total }}</td></tr>
+        </table>
+      </section>
+
+      <section class="card">
+        <h2>材料</h2>
+        <ul class="material-list">
+          {% for m in desc.materials %}
+          <li>
+            <span class="block-dot" style="background: {{ m.color or '#888' }}"></span>
+            {{ m.name }}
+            <span class="fraction">{{ (m.fraction * 100)|int }}%</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>特征</h2>
+        <ul class="feature-list">
+          {% for f in desc.features %}
+          <li>{{ f.feature_type }} {% if f.position %}({{ f.position }}){% endif %} ×{{ f.count }}</li>
+          {% endfor %}
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>方块 Palette</h2>
+        <ol class="palette-list">
+          {% for p in palette %}
+          <li><code>{{ p }}</code></li>
+          {% endfor %}
+        </ol>
+      </section>
+    </div>
+
+    <div class="actions">
+      <a href="{{ download_url }}" class="btn btn-primary" download>
+        ⬇ 下载 .nbt 结构文件
+      </a>
+      <a href="/" class="btn btn-secondary">← 再生成一个</a>
+    </div>
+
+    {% if desc.description %}
+    <section class="card description-card">
+      <h2>AI 描述</h2>
+      <p>{{ desc.description }}</p>
+    </section>
+    {% endif %}
+  </main>
+
+  <footer>
+    <p>开源项目 · <a href="https://github.com/your-username/minecraft-real-structure" target="_blank">GitHub</a></p>
+  </footer>
+</div>
+</body>
+</html>

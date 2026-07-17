@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Minecraft Real Structure</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Minecraft Real Structure</h1>
+    <p class="subtitle">上传建筑照片，AI 生成 Minecraft 结构文件</p>
+  </header>
+
+  <main>
+    <form id="uploadForm" action="/analyze" method="POST" enctype="multipart/form-data">
+      <div class="upload-zone" id="dropZone">
+        <div class="upload-icon">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+        </div>
+        <p class="upload-text">拖拽图片到这里，或 <span class="link">点击选择</span></p>
+        <p class="upload-hint">支持 JPG / PNG / WebP</p>
+        <input type="file" name="image" id="fileInput" accept="image/*" hidden>
+        <div id="filePreview" class="file-preview hidden">
+          <img id="previewImg" alt="预览">
+          <span id="fileName"></span>
+        </div>
+      </div>
+
+      <div class="options">
+        <label for="version">Minecraft 版本</label>
+        <select name="version" id="version">
+          <option value="java-1.20">Java 1.20+</option>
+          <option value="java-1.17">Java 1.17+</option>
+          <option value="java-1.13">Java 1.13+</option>
+          <option value="java-1.12">Java 1.12</option>
+        </select>
+      </div>
+
+      <div class="options">
+        <label for="apiKey">API Key <span class="hint">(选填，不填则用 Mock 数据)</span></label>
+        <input type="password" name="api_key" id="apiKey" placeholder="智谱 GLM-4V-Flash API Key">
+      </div>
+
+      <button type="submit" id="submitBtn" disabled>
+        <span class="btn-text">生成结构</span>
+        <span class="btn-loading hidden">
+          <span class="spinner"></span> 分析中...
+        </span>
+      </button>
+    </form>
+  </main>
+
+  <footer>
+    <p>开源项目 · <a href="https://github.com/your-username/minecraft-real-structure" target="_blank">GitHub</a></p>
+  </footer>
+</div>
+
+<script>
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const preview = document.getElementById('filePreview');
+const previewImg = document.getElementById('previewImg');
+const fileName = document.getElementById('fileName');
+const submitBtn = document.getElementById('submitBtn');
+const form = document.getElementById('uploadForm');
+const btnText = document.querySelector('.btn-text');
+const btnLoading = document.querySelector('.btn-loading');
+
+// 点击上传区域触发文件选择
+dropZone.addEventListener('click', () => fileInput.click());
+
+// 拖拽上传
+dropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropZone.classList.add('dragover');
+});
+dropZone.addEventListener('dragleave', () => {
+  dropZone.classList.remove('dragover');
+});
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  if (e.dataTransfer.files.length) {
+    fileInput.files = e.dataTransfer.files;
+    showPreview(e.dataTransfer.files[0]);
+  }
+});
+
+// 选择文件
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length) {
+    showPreview(fileInput.files[0]);
+  }
+});
+
+function showPreview(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    previewImg.src = e.target.result;
+    fileName.textContent = file.name;
+    preview.classList.remove('hidden');
+    submitBtn.disabled = false;
+  };
+  reader.readAsDataURL(file);
+}
+
+// 提交时显示加载状态
+form.addEventListener('submit', () => {
+  submitBtn.disabled = true;
+  btnText.classList.add('hidden');
+  btnLoading.classList.remove('hidden');
+});
+</script>
+</body>
+</html>

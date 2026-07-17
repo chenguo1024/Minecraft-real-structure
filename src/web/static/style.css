@@ -1,0 +1,207 @@
+/* ── 基础样式 ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #1a1a2e;
+  --card: #16213e;
+  --accent: #e94560;
+  --text: #eaeaea;
+  --muted: #8899aa;
+  --border: #2a2a4a;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  line-height: 1.6;
+}
+a { color: var(--accent); }
+.container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+/* ── 头部 ── */
+header { text-align: center; margin-bottom: 2rem; }
+h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
+.subtitle { color: var(--muted); font-size: 0.95rem; }
+
+/* ── 上传区域 ── */
+.upload-zone {
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  padding: 3rem 2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+.upload-zone:hover, .upload-zone.dragover {
+  border-color: var(--accent);
+  background: rgba(233, 69, 96, 0.05);
+}
+.upload-icon { color: var(--muted); margin-bottom: 1rem; }
+.upload-text { font-size: 1.1rem; margin-bottom: 0.25rem; }
+.upload-hint { color: var(--muted); font-size: 0.85rem; }
+.link { color: var(--accent); text-decoration: underline; }
+
+.file-preview {
+  margin-top: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.file-preview img {
+  width: 60px; height: 60px;
+  object-fit: cover; border-radius: 8px;
+}
+.file-preview.hidden { display: none; }
+.hidden { display: none; }
+
+/* ── 选项 ── */
+.options {
+  margin-top: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.options label { font-size: 0.9rem; color: var(--muted); }
+.options .hint { font-size: 0.75rem; color: var(--muted); font-weight: normal; }
+.options input[type="password"], .options input[type="text"] {
+  flex: 1;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+}
+select {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+}
+
+/* ── 按钮 ── */
+button, .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  font-size: 1rem;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.2s;
+  text-decoration: none;
+}
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+#submitBtn {
+  width: 100%;
+  margin-top: 1.5rem;
+  background: var(--accent);
+  color: white;
+}
+.btn-primary {
+  background: var(--accent);
+  color: white;
+}
+.btn-secondary {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.actions {
+  display: flex;
+  gap: 1rem;
+  margin-top: 2rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.spinner {
+  display: inline-block;
+  width: 16px; height: 16px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── 结果页 ── */
+.result-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+@media (max-width: 600px) {
+  .result-grid { grid-template-columns: 1fr; }
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem;
+}
+.card h2 {
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 0.75rem;
+}
+
+.info-table { width: 100%; border-collapse: collapse; }
+.info-table td {
+  padding: 0.35rem 0;
+  font-size: 0.9rem;
+}
+.info-table td:first-child { color: var(--muted); width: 40%; }
+
+.material-list, .feature-list {
+  list-style: none;
+}
+.material-list li, .feature-list li {
+  padding: 0.3rem 0;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.block-dot {
+  width: 12px; height: 12px;
+  border-radius: 3px;
+  display: inline-block;
+}
+.fraction { margin-left: auto; color: var(--muted); font-size: 0.8rem; }
+
+.palette-list {
+  list-style: decimal;
+  padding-left: 1.25rem;
+}
+.palette-list li { font-size: 0.8rem; margin-bottom: 0.25rem; }
+.palette-list code {
+  background: rgba(255,255,255,0.05);
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.8rem;
+}
+
+.description-card { margin-top: 1rem; }
+.description-card p { font-size: 0.9rem; line-height: 1.7; }
+
+/* ── 页脚 ── */
+footer {
+  text-align: center;
+  margin-top: 3rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
