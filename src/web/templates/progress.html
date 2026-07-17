@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分析中 - Minecraft Real Structure</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>正在生成结构...</h1>
+    <p class="subtitle">AI 分析 + 三维生成 + NBT 导出</p>
+  </header>
+
+  <main>
+    <div class="card" style="text-align:center;padding:60px 40px;">
+      <div class="progress-ring" id="progressRing">
+        <svg width="120" height="120" viewBox="0 0 120 120">
+          <circle cx="60" cy="60" r="54" fill="none" stroke="#333" stroke-width="8"/>
+          <circle id="progressCircle" cx="60" cy="60" r="54" fill="none" stroke="#4fc3f7" stroke-width="8"
+                  stroke-linecap="round" stroke-dasharray="339.292" stroke-dashoffset="339.292"/>
+        </svg>
+        <div class="progress-text">
+          <span id="progressPct">0</span>%
+        </div>
+      </div>
+      <p id="progressMessage" style="color:#aaa;margin-top:20px;">{{ message }}</p>
+      <p style="color:#666;font-size:13px;">任务 ID: <code>{{ task_id }}</code></p>
+    </div>
+  </main>
+
+  <footer>
+    <p>开源项目 · <a href="https://github.com/chenguo1024/Minecraft-real-structure" target="_blank">GitHub</a></p>
+  </footer>
+</div>
+
+<style>
+.progress-ring { position: relative; display: inline-block; margin: 0 auto; }
+.progress-text {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  font-size: 28px; font-weight: bold; color: #4fc3f7;
+}
+</style>
+
+<script>
+(function() {
+  var taskId = "{{ task_id }}";
+  var poll = setInterval(function() {
+    fetch("/progress/" + taskId)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        document.getElementById("progressPct").textContent = data.pct;
+        document.getElementById("progressMessage").textContent = data.message;
+        var circle = document.getElementById("progressCircle");
+        var circumference = 339.292;
+        var offset = circumference - (data.pct / 100) * circumference;
+        circle.style.strokeDashoffset = offset;
+        if (data.pct >= 100) {
+          clearInterval(poll);
+          window.location.href = "/result/" + taskId;
+        }
+        if (data.pct < 0) {
+          clearInterval(poll);
+          document.getElementById("progressMessage").textContent = "错误: " + data.message;
+          document.getElementById("progressMessage").style.color = "#ff4444";
+        }
+      });
+  }, 1000);
+})();
+</script>
+</body>
+</html>

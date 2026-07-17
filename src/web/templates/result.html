@@ -102,6 +102,11 @@
             'quartz_block': 0xeeeeee, 'gold_block': 0xffcc44,
             'bricks': 0xbb6644, 'cobblestone': 0x777777,
             'spruce_planks': 0x8b5e3c, 'dark_oak_planks': 0x4a3018,
+            'red_concrete': 0xaa3a3a, 'yellow_terracotta': 0xd4b04a,
+            'black_concrete': 0x222222, 'blue_concrete': 0x3366aa,
+            'green_terracotta': 0x4a7a4a, 'terracotta': 0xb87a5a,
+            'andesite': 0x888888, 'stone': 0x777777,
+            'deepslate': 0x444444, 'deepslate_bricks': 0x444455,
           };
           function getColor(name) {
             var key = name.replace('minecraft:', '');
@@ -109,6 +114,9 @@
             return 0x88aa88;
           }
 
+          // Group blocks by color
+          var colorGroups = {};
+          var dummy = new THREE.Object3D();
           var geom = new THREE.BoxGeometry(scale * 0.95, scale * 0.95, scale * 0.95);
 
           for (var z = 0; z < sizeZ; z++) {
@@ -120,13 +128,26 @@
                 var matName = palette[palIdx];
                 if (matName.indexOf('air') !== -1) continue;
                 var color = getColor(matName);
-                var mat = new THREE.MeshLambertMaterial({ color: color });
-                var mesh = new THREE.Mesh(geom, mat);
-                mesh.position.set(x * scale, y * scale, z * scale);
-                scene.add(mesh);
+                if (!colorGroups[color]) colorGroups[color] = [];
+                colorGroups[color].push({x: x * scale, y: y * scale, z: z * scale});
               }
             }
           }
+
+          // Create InstancedMesh per color group
+          Object.keys(colorGroups).forEach(function(colorHex) {
+            var c = parseInt(colorHex);
+            var positions = colorGroups[colorHex];
+            var mat = new THREE.MeshLambertMaterial({ color: c });
+            var mesh = new THREE.InstancedMesh(geom, mat, positions.length);
+            for (var i = 0; i < positions.length; i++) {
+              dummy.position.set(positions[i].x, positions[i].y, positions[i].z);
+              dummy.updateMatrix();
+              mesh.setMatrixAt(i, dummy.matrix);
+            }
+            mesh.instanceMatrix.needsUpdate = true;
+            scene.add(mesh);
+          });
 
           var ambient = new THREE.AmbientLight(0x404060);
           scene.add(ambient);

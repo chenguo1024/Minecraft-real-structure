@@ -364,6 +364,46 @@ class TestFacades:
         assert front == stone_idx, "正面应为 stone_bricks"
         assert back == qb_idx, "背面应为 quartz_block"
 
+    def test_facade_all_faces_different(self):
+        """四个面各自独立材料。"""
+        desc = self._facade_desc(
+            materials=[
+                BlockMaterial(name="stone_bricks"),
+                BlockMaterial(name="quartz_block"),
+                BlockMaterial(name="red_terracotta"),
+                BlockMaterial(name="bricks"),
+            ],
+            facades=[
+                Facade(face="front", material="stone_bricks"),
+                Facade(face="back", material="quartz_block"),
+                Facade(face="left", material="red_terracotta"),
+                Facade(face="right", material="bricks"),
+            ],
+        )
+        builder = BlockBuilder(desc)
+        s = builder.build()
+        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
+        palette = s.palette
+        assert palette[s.blocks[idx(3, 3, 0)]] == "minecraft:stone_bricks", "正面 stone_bricks"
+        assert palette[s.blocks[idx(3, 3, s.size_z - 1)]] == "minecraft:quartz_block", "背面 quartz_block"
+        assert palette[s.blocks[idx(0, 3, 3)]] == "minecraft:red_terracotta", "左侧 red_terracotta"
+        assert palette[s.blocks[idx(s.size_x - 1, 3, 3)]] == "minecraft:bricks", "右侧 bricks"
+
+    def test_facade_arch_opening(self):
+        """拱门样式的开口。"""
+        desc = self._facade_desc(
+            facades=[
+                Facade(face="front", material="stone_bricks",
+                       openings=[FaceOpening(x=0.5, width=0.3, height=3, style="arch")]),
+            ],
+        )
+        builder = BlockBuilder(desc)
+        s = builder.build()
+        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
+        air_idx = s.palette.index("minecraft:air")
+        # 拱门底部应为空气
+        assert s.blocks[idx(5, 1, 0)] == air_idx, "拱门底部应为空气"
+
 
 class TestCurvesAndCircles:
     """测试曲线/圆形辅助方法。"""
@@ -415,3 +455,98 @@ class TestCurvesAndCircles:
         idx = lambda x, y, z: x + y * w + z * w * h
         # 圆上一点 (dx=-3, dz=0 → x=5, z=8)
         assert pal[grid[idx(5, 1, 8)]] == "minecraft:stone_bricks"
+
+
+class TestInterior:
+    """测试内部结构（楼梯/隔墙/家具）。"""
+
+    def test_stairs_generated(self):
+        desc = _make_desc(height=12, width=8, length=10,
+                          features=[
+                              BuildingFeature(feature_type="stairs"),
+                              BuildingFeature(feature_type="roof", position="flat"),
+                          ])
+        builder = BlockBuilder(desc)
+        s = builder.build()
+        assert len(s.blocks) > 0
+
+    def test_room_partitions_generated(self):
+        desc = _make_desc(height=10, width=12, length=12,
+                          features=[
+                              BuildingFeature(feature_type="room"),
+                              BuildingFeature(feature_type="roof", position="flat"),
+                          ])
+        builder = BlockBuilder(desc)
+        s = builder.build()
+        assert len(s.blocks) > 0
+
+    def test_furniture_generated(self):
+        desc = _make_desc(height=8, width=8, length=8,
+                          features=[
+                              BuildingFeature(feature_type="furniture"),
+                              BuildingFeature(feature_type="roof", position="flat"),
+                          ])
+        builder = BlockBuilder(desc)
+        s = builder.build()
+        assert len(s.blocks) > 0
+
+    def test_interior_all_features(self):
+        desc = _make_desc(height=12, width=10, length=12,
+                          features=[
+                              BuildingFeature(feature_type="stairs"),
+                              BuildingFeature(feature_type="room"),
+                              BuildingFeature(feature_type="furniture"),
+                              BuildingFeature(feature_type="roof", position="flat"),
+                          ])
+        builder = BlockBuilder(desc)
+        s = builder.build()
+        assert len(s.blocks) > 0
+
+
+class TestWikipediaDepth:
+    """测试 Wikipedia 深度利用相关字段。"""
+
+    def test_bays_field_stored(self):
+        from src.models.building import BuildingDescription
+        desc = BuildingDescription(
+            minecraft_version=MinecraftVersion.JAVA_1_20,
+            building_type="gate",
+            height=8, width=12, length=6,
+            bays=5,
+        )
+        assert desc.bays == 5
+
+    def test_columns_field_parsed(self):
+        from src.generator.block_builder import BlockBuilder
+        desc = _make_desc(
+            features=[
+                BuildingFeature(feature_type="column", count=4),
+                BuildingFeature(feature_type="roof", position="flat"),
+            ],
+        )
+        builder = BlockBuilder(desc)
+        s = builder.build()
+        assert len(s.blocks) > 0
+
+    def test_roof_style_from_wikipedia(self):
+        desc = _make_desc(
+            roof="xieshan",
+            features=[BuildingFeature(feature_type="roof", position="xieshan")],
+        )
+        s = BlockBuilder(desc).build()
+        assert len(s.blocks) > 0
+
+    def test_arch_curve_places_blocks(self):
+        desc = _make_desc(roof="flat")
+        builder = BlockBuilder(desc)
+        builder._grid = [
+            [[builder._idx("air") for _ in range(builder.w)] for _ in range(builder.h)]
+            for _ in range(builder.l)
+        ]
+        builder._arch_curve(4, 4, 3, 1, 4, "stone_bricks")
+        w, h, l = builder.w, builder.h, builder.l
+        grid = [builder._grid[z][y][x] for z in range(l) for y in range(h) for x in range(w)]
+        pal = builder._palette_list
+        idx = lambda x, y, z: x + y * w + z * w * h
+        # 拱顶 (x=4, y=1+4=5)
+        assert pal[grid[idx(4, 5, 4)]] == "minecraft:stone_bricks"
