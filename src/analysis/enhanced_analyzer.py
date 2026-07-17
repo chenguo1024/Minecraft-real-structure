@@ -82,17 +82,13 @@ def _apply_wikipedia_data(
     else:
         result.detail_scale = 1  # 大型建筑标准
 
-    # 风格
+    # 风格和材料只做参考补充，不改 AI 视觉分析的结果
     if "architectural_style" in wiki_data:
         style = wiki_data["architectural_style"].lower()
-        result.style = _map_style(style)
-
-    # 材料
-    if "material" in wiki_data:
-        mat_text = wiki_data["material"].lower()
-        mapped = _map_material(mat_text)
-        if mapped:
-            result.materials = mapped
+        mapped = _map_style(style)
+        if mapped and mapped != "modern":
+            # 只有 Wikipedia 风格明确时才覆盖
+            result.style = mapped
 
     # 附加 Wikipedia 信息到描述
     wiki_info = []
@@ -183,9 +179,10 @@ def analyze(
     # 2. 合并多角度结果
     merged = _merge_descriptions(descs)
 
-    # 3. 如果识别到建筑名称，查 Wikipedia
+    # 3. 如果识别到具体的建筑名称，查 Wikipedia（只查完整名称，避免误匹配）
     wiki_data = None
-    if merged.building_name:
+    if merged.building_name and len(merged.building_name) >= 4:
+        # 只对具体名称（≥4个字符）查 Wikipedia
         wiki_data = lookup_building(merged.building_name)
 
     # 4. 用 Wikipedia 数据增强
