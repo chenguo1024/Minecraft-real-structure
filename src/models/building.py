@@ -64,4 +64,7 @@ class BuildingDescription(BaseModel):
     )
     floors: int = Field(default=1, ge=1, le=100, description="楼层数")
     detail_scale: int = Field(default=1, ge=1, le=8, description="精细度缩放倍率。1=每米1格(标准), 2=每米2格(精细), 3=每米3格(极精细)")
+    bays: int | None = Field(default=None, description="开间数（正面柱间数量），如天安门 9 间，常见 1/3/5/7/9")
+    roof_tiers: int | None = Field(default=None, description="屋顶层数/重檐数，如天安门重檐=2，普通建筑=1")
+    platform_height: int | None = Field(default=None, description="台基/基座高度（方块数），如天安门的城台")
     description: str = Field(default="", description="AI 生成的额外文字描述")

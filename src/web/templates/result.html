@@ -67,6 +67,16 @@
       <a href="{{ download_url }}" class="btn btn-primary" download>
         ⬇ 下载 .nbt 结构文件
       </a>
+      <p class="mc-path">已同步到 Minecraft: <code>minecraft:structures/{{ download_url.split("/")[-1] }}</code></p>
+      <div class="alert alert-info">
+        <strong>📌 放置命令</strong><br>
+        游戏内按 T 输入：<code>/place template minecraft:{{ download_url.split("/")[-1].replace(".nbt", "") }}</code>
+      </div>
+      {% if size_x > 48 or size_y > 48 or size_z > 48 %}
+      <div class="alert alert-warning">
+        <strong>⚠ 结构超过 48×48×48</strong> — 结构方块无法放置此大小的结构，请用上面的 <code>/place template</code> 命令。
+      </div>
+      {% endif %}
       <a href="/" class="btn btn-secondary">← 再生成一个</a>
     </div>
 

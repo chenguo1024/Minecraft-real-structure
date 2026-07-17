@@ -34,16 +34,16 @@ class TestBlockMap:
         assert bid == "minecraft:copper_block"
 
     def test_unknown_material_fallback_to_current_version_stone(self):
-        """完全未知的材质 → 返回当前版本的 stone。"""
+        """完全未知的材料 → 返回当前版本的 stone_bricks。"""
         bm = BlockMap(MinecraftVersion.JAVA_1_20)
         bid = bm.get_block_id("nonexistent_material_xyz")
-        assert bid == "minecraft:stone"
+        assert bid == "minecraft:stone_bricks"
 
     def test_bedrock_fallback_for_nonexistent(self):
-        """Bedrock 下未知材质 → 返回当前版本的 stone (minecraft:stone)。"""
+        """Bedrock 对未知材料 → 返回当前版本的 stonebrick（stone_bricks 的 Bedrock 名）。"""
         bm = BlockMap(MinecraftVersion.BEDROCK_1_20)
         bid = bm.get_block_id("nonexistent_material_xyz")
-        assert bid == "minecraft:stone"
+        assert bid == "minecraft:stonebrick"
 
     def test_all_versions_have_oak_planks(self):
         """oak_planks 是所有版本的基本方块。"""
@@ -77,12 +77,12 @@ class TestBlockMapEdgeCases:
     def test_empty_string_returns_current_stone(self):
         bm = BlockMap(MinecraftVersion.JAVA_1_20)
         bid = bm.get_block_id("")
-        assert bid == "minecraft:stone"
+        assert bid == "minecraft:stone_bricks"
 
     def test_unknown_material_in_bedrock(self):
         bm = BlockMap(MinecraftVersion.BEDROCK_1_20)
         bid = bm.get_block_id("")
-        assert bid == "minecraft:stone"
+        assert bid == "minecraft:stonebrick"
 
     def test_concrete_and_steel(self):
         """提示词中添加的额外材料映射。"""

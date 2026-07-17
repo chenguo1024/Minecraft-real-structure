@@ -108,17 +108,22 @@ def export(
         _write_compound_end(buf)
 
     # ── blocks: List[Compound] ──
-    # 每个条目是 Compound 内容（无 0x0A 头，无 name）
-    _write_list_header(buf, "blocks", TAG_COMPOUND, len(structure.blocks))
+    # 只包含非空气方块（palette 索引 0 为 air）
+    block_entries = []
     idx = 0
     for z in range(structure.size_z):
         for y in range(structure.size_y):
             for x in range(structure.size_x):
-                _write_int_list(buf, "pos", [x, y, z])
-                _write_tag_header(buf, TAG_INT, "state")
-                _write_int(buf, structure.blocks[idx])
-                _write_compound_end(buf)
+                palette_idx = structure.blocks[idx]
+                if palette_idx != 0:  # 跳过空气
+                    block_entries.append((x, y, z, palette_idx))
                 idx += 1
+    _write_list_header(buf, "blocks", TAG_COMPOUND, len(block_entries))
+    for x, y, z, palette_idx in block_entries:
+        _write_int_list(buf, "pos", [x, y, z])
+        _write_tag_header(buf, TAG_INT, "state")
+        _write_int(buf, palette_idx)
+        _write_compound_end(buf)
 
     # ── entities: List (empty) — 原版空列表用 TAG_End 作条目类型 ──
     _write_list_header(buf, "entities", TAG_END, 0)

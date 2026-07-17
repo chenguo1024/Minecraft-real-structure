@@ -594,11 +594,44 @@ class BlockMap:
 
     def get_block_id(self, material_name: str) -> str:
         """返回材料对应的方块 ID。如果当前版本没有，自动 fallback。"""
+        key = material_name.lower().strip()
         current_palette = self._PALETTE.get(self.version.value, {})
-        block_id = current_palette.get(material_name)
 
+        # 先尝试精确查找
+        block_id = current_palette.get(key)
         if block_id is not None:
             return block_id
+
+        # 未找到时，归一化 AI 通用名再查
+        ALIASES = {
+            "wood": "oak_planks",
+            "wooden planks": "oak_planks",
+            "timber": "oak_planks",
+            "planks": "oak_planks",
+            "stone": "stone_bricks",
+            "marble": "quartz_block",
+            "granite": "polished_granite",
+            "steel": "iron_block",
+            "metal": "iron_block",
+            "concrete": "white_concrete",
+            "brick": "bricks",
+            "glass": "glass",
+            "glass pane": "glass_pane",
+            "cobblestone": "cobblestone",
+            "sand stone": "sandstone",
+            "red brick": "bricks",
+            "dark wood": "dark_oak_planks",
+            "light wood": "birch_planks",
+            "white marble": "quartz_block",
+            "roof tile": "stone_bricks",
+            "wall": "stone_bricks",
+            "floor": "oak_planks",
+        }
+        aliased = ALIASES.get(key)
+        if aliased:
+            block_id = current_palette.get(aliased)
+            if block_id is not None:
+                return block_id
 
         # ── Fallback 链：按版本从新到旧查找 ──
         fallback_order = [
@@ -612,8 +645,8 @@ class BlockMap:
             if fb == self.version:
                 continue
             palette = self._PALETTE.get(fb.value, {})
-            block_id = palette.get(material_name)
+            block_id = palette.get(aliased or key)
             if block_id is not None:
                 return block_id
 
-        return current_palette.get("stone", self._PALETTE[MinecraftVersion.JAVA_1_12.value]["stone"])
+        return current_palette.get("stone_bricks", self._PALETTE[MinecraftVersion.JAVA_1_12.value]["stone_bricks"])

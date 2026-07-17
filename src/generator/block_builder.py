@@ -1,86 +1,36 @@
-"""方块生成器 —— 根据 BuildingDescription 生成三维方块数据。
-
-设计理由：
-  1. 每种屋顶类型独立实现算法，通过 RoofStyle 枚举统一调度。
-  2. L 形 / 十字形建筑通过"多个矩形翼板叠加"实现，
-     每个翼板独立调用墙壁/窗户/屋顶逻辑，最后合并到一个 grid。
-  3. 风格模板将 style 字段（如 "gothic"）映射为默认的 roof/wall/window 组合，
-     这样 AI 只需要说 "style: gothic"，生成器自动选择合适的建筑特征。
-"""
-
 from __future__ import annotations
 
 import math
+import random
 import warnings
 from enum import Enum
 
 from src.generator.block_map import BlockMap
 from src.models.building import BuildingDescription
 
-# ── 材料常量 ──
+
+# ── 默认材料常量（被 AI materials 列表覆盖） ──
 MAT_AIR = "air"
 MAT_WALL = "stone_bricks"
 MAT_FLOOR = "oak_planks"
 MAT_ROOF = "stone_bricks"
-MAT_ROOF_EDGE = "polished_andesite"
 MAT_WINDOW = "glass"
-MAT_PILLAR = "stone_bricks"
-MAT_TRIM = "polished_andesite"
+MAT_PILLAR = "chiseled_stone_bricks"
 
 # 风格 → 默认特征映射
 STYLE_DEFAULTS: dict[str, dict] = {
-    "modern": {
-        "roof": "flat",
-        "wall_pillar": False,
-        "window_spacing": 3,
-        "trim": True,
-    },
-    "gothic": {
-        "roof": "gable",
-        "wall_pillar": True,
-        "window_spacing": 3,
-        "trim": True,
-    },
-    "classical": {
-        "roof": "hip",
-        "wall_pillar": True,
-        "window_spacing": 4,
-        "trim": True,
-    },
-    "asian": {
-        "roof": "pyramid",
-        "wall_pillar": True,
-        "window_spacing": 3,
-        "trim": False,
-    },
-    "medieval": {
-        "roof": "gable",
-        "wall_pillar": True,
-        "window_spacing": 4,
-        "trim": False,
-    },
-    "brutalist": {
-        "roof": "flat",
-        "wall_pillar": False,
-        "window_spacing": 2,
-        "trim": False,
-    },
+    "modern": {"roof": "flat", "wall_pillar": False, "window_spacing": 3, "trim": True},
+    "gothic": {"roof": "gable", "wall_pillar": True, "window_spacing": 3, "trim": True},
+    "classical": {"roof": "hip", "wall_pillar": True, "window_spacing": 4, "trim": True},
+    "asian": {"roof": "pyramid", "wall_pillar": True, "window_spacing": 3, "trim": False},
+    "medieval": {"roof": "gable", "wall_pillar": True, "window_spacing": 4, "trim": False},
+    "brutalist": {"roof": "flat", "wall_pillar": False, "window_spacing": 2, "trim": False},
+    "chinese": {"roof": "pyramid", "wall_pillar": True, "window_spacing": 3, "trim": False},
 }
-
 DEFAULT_STYLE = "modern"
 
 
-class RoofStyle(str, Enum):
-    FLAT = "flat"
-    GABLE = "gable"
-    HIP = "hip"
-    PYRAMID = "pyramid"
-    DOME = "dome"
-
-
 class BlockStructure:
-    """生成后的方块结构数据。"""
-
     def __init__(self, palette: list[str], blocks: list[int],
                  size_x: int, size_y: int, size_z: int) -> None:
         self.palette = palette
@@ -90,47 +40,72 @@ class BlockStructure:
         self.size_z = size_z
 
 
-MAX_RECOMMENDED = 128  # 结构方块加载上限 48，但 /place template 命令无限制
+# Minecraft 1.20+ /place template 命令支持最大 128×128×128
+# 结构方块（LOAD 模式）限制 48×48×48，超过自动提示用命令
+MAX_STRUCTURE_BLOCK = 128
+STRUCTURE_BLOCK_LIMIT = 48  # 结构方块上限，仅用于提示
+MAX_RECOMMENDED = 128
 
 
 class BlockBuilder:
-    """将 BuildingDescription 转为三维方块数组。"""
-
     def __init__(self, description: BuildingDescription) -> None:
         self.desc = description
         self.block_map = BlockMap(description.minecraft_version)
 
-        # 精细度缩放
         scale = max(1, description.detail_scale)
-        self.w = description.width * scale
-        self.h = description.height * scale
-        self.l = description.length * scale
+        self.w = min(description.width * scale, MAX_STRUCTURE_BLOCK)
+        self.h = min(description.height * scale, MAX_STRUCTURE_BLOCK)
+        self.l = min(description.length * scale, MAX_STRUCTURE_BLOCK)
 
-        # 尺寸警告
+
+
+        if self.w > STRUCTURE_BLOCK_LIMIT or self.h > STRUCTURE_BLOCK_LIMIT or self.l > STRUCTURE_BLOCK_LIMIT:
+            warnings.warn(f"结构({self.w}x{self.h}x{self.l})超出结构方块上限({STRUCTURE_BLOCK_LIMIT}^3)，请用 /place template 命令放置")
+
         oversized = [dim for dim, val in
                      [("width", self.w), ("height", self.h), ("length", self.l)]
                      if val > MAX_RECOMMENDED]
         if oversized:
-            warnings.warn(
-                f"尺寸大于结构方块推荐上限 ({MAX_RECOMMENDED}): "
-                f"{', '.join(oversized)}。"
-                f"可用 /place template 命令放置更大结构。"
-            )
+            warnings.warn(f"结构尺寸较大 ({', '.join(oversized)})，可用 /place template 命令放置")
+
         self.shape = description.shape
         self.floors = max(1, self.h // 4)
-
-        # 风格映射
         self.style_cfg = STYLE_DEFAULTS.get(description.style, STYLE_DEFAULTS[DEFAULT_STYLE])
+
+        # 从 AI materials 列表中选取主材料
+        self._init_materials()
 
         # 从 features 中解析屋顶类型
         self.roof_type = self._resolve_roof_type()
 
-        # 三维数组
         self._grid: list[list[list[int]]] = []
         self._block_to_idx: dict[str, int] = {}
         self._palette_list: list[str] = []
 
-    # ── 工具方法 ──
+    # ── 材料选择 ──
+
+    def _init_materials(self) -> None:
+        materials = self.desc.materials
+        if materials:
+            sorted_mats = sorted(materials, key=lambda m: m.fraction or 0, reverse=True)
+            primary = sorted_mats[0].name
+            self.mat_wall = primary
+            self.mat_roof = sorted_mats[1].name if len(sorted_mats) > 1 else primary
+            self.mat_floor = sorted_mats[-1].name if len(sorted_mats) > 1 else "oak_planks"
+            self.mat_trim = sorted_mats[1].name if len(sorted_mats) > 1 else "polished_andesite"
+            self.mat_pillar = primary
+            # 选择对比材料做装饰
+            accent = sorted_mats[-1].name if len(sorted_mats) > 2 else "polished_andesite"
+            self.mat_accent = accent
+            self.mat_detail = sorted_mats[1].name if len(sorted_mats) > 1 else primary
+        else:
+            self.mat_wall = MAT_WALL
+            self.mat_roof = MAT_ROOF
+            self.mat_floor = MAT_FLOOR
+            self.mat_trim = "polished_andesite"
+            self.mat_pillar = MAT_PILLAR
+            self.mat_accent = "polished_andesite"
+            self.mat_detail = MAT_WALL
 
     def _resolve(self, material_name: str) -> str:
         return self.block_map.get_block_id(material_name)
@@ -158,20 +133,30 @@ class BlockBuilder:
                     self._grid[z][y][x] = self._idx(mat)
 
     def _hollow_fill(self, x1: int, y1: int, z1: int, x2: int, y2: int, z2: int, mat: str) -> None:
-        """只填充立方体表面（空心）。"""
         for z in range(max(0, z1), min(self.l, z2 + 1)):
             for y in range(max(0, y1), min(self.h, y2 + 1)):
                 for x in range(max(0, x1), min(self.w, x2 + 1)):
                     if x == x1 or x == x2 or y == y1 or y == y2 or z == z1 or z == z2:
                         self._grid[z][y][x] = self._idx(mat)
 
+    def _line_x(self, x1: int, x2: int, y: int, z: int, mat: str) -> None:
+        for x in range(min(x1, x2), max(x1, x2) + 1):
+            self._set(x, y, z, mat)
+
+    def _line_z(self, z1: int, z2: int, x: int, y: int, mat: str) -> None:
+        for z in range(min(z1, z2), max(z1, z2) + 1):
+            self._set(x, y, z, mat)
+
+    def _line_y(self, y1: int, y2: int, x: int, z: int, mat: str) -> None:
+        for y in range(min(y1, y2), max(y1, y2) + 1):
+            self._set(x, y, z, mat)
+
     def _is_air(self, x: int, y: int, z: int) -> bool:
         return self._get(x, y, z) == self._idx(MAT_AIR)
 
-    # ── 屋顶类型推断 ──
+    # ── 屋顶类型 ──
 
     def _resolve_roof_type(self) -> str:
-        """从 features 和 style 推断屋顶类型。"""
         for f in self.desc.features:
             if f.feature_type == "roof":
                 return f.position or self.style_cfg["roof"]
@@ -182,24 +167,278 @@ class BlockBuilder:
     def _build_floor(self) -> None:
         for floor in range(self.floors):
             y = floor * (self.h // self.floors)
-            self._fill(0, y, 0, self.w - 1, y, self.l - 1, MAT_FLOOR)
+            self._fill(0, y, 0, self.w - 1, y, self.l - 1, self.mat_floor)
 
-    # ── 墙壁（按翼板构建） ──
+    # ═══════════════════════════════════════════════════════════════
+    #  按建筑类型构建
+    # ═══════════════════════════════════════════════════════════════
+
+    def build(self) -> BlockStructure:
+        self._grid = [
+            [[self._idx(MAT_AIR) for _ in range(self.w)] for _ in range(self.h)]
+            for _ in range(self.l)
+        ]
+
+        btype = self.desc.building_type
+        if btype == "gate":
+            self._build_gate()
+        elif btype == "arch":
+            self._build_arch()
+        elif btype == "tower":
+            self._build_tower()
+        elif btype == "pagoda":
+            self._build_pagoda()
+        elif btype == "bridge":
+            self._build_bridge()
+        else:
+            self._build_generic()
+
+        flat: list[int] = []
+        for z in range(self.l):
+            for y in range(self.h):
+                for x in range(self.w):
+                    flat.append(self._grid[z][y][x])
+
+        return BlockStructure(
+            palette=self._palette_list,
+            blocks=flat,
+            size_x=self.w,
+            size_y=self.h,
+            size_z=self.l,
+        )
+
+    # ─── 大门 / 牌坊 ───
+
+    def _build_gate(self) -> None:
+        """大门建筑：多开间柱列 + 台基 + 重檐屋顶。"""
+        bays = self.desc.bays or max(1, self.w // 4)
+        column_rows = self.l // 3 if self.l > 2 else 1
+        platform_h = min(self.desc.platform_height or max(1, self.h // 6), self.h // 3)
+        roof_tiers = self.desc.roof_tiers or 1
+        column_w = max(1, self.w // (bays * 3 + 2))
+        bay_w = (self.w - column_w) // bays if bays > 0 else self.w
+
+        # 1. 台基（平台）
+        if platform_h > 0:
+            self._fill(0, 0, 0, self.w - 1, platform_h - 1, self.l - 1, self.mat_wall)
+            # 台基边缘装饰
+            for z in range(self.l):
+                self._set(0, platform_h - 1, z, self.mat_trim)
+                self._set(self.w - 1, platform_h - 1, z, self.mat_trim)
+            for x in range(self.w):
+                self._set(x, platform_h - 1, 0, self.mat_trim)
+                self._set(x, platform_h - 1, self.l - 1, self.mat_trim)
+            # 台基上的栏杆柱
+            for x in range(0, self.w, max(2, bay_w // 2)):
+                for z in range(0, self.l, max(2, self.l - 1)):
+                    self._set(x, platform_h, z, self.mat_accent)
+
+        # 2. 多开间柱列
+        pillar_top = self.h - (roof_tiers * (self.h - platform_h) // (roof_tiers + 1))
+        for col_row in range(column_rows):
+            z = col_row * (self.l - 1) // max(1, column_rows - 1) if column_rows > 1 else self.l // 2
+            for bay_idx in range(bays + 1):
+                x = bay_idx * bay_w
+                if x >= self.w:
+                    x = self.w - 1
+                for y in range(platform_h, pillar_top):
+                    self._set(x, y, z, self.mat_pillar)
+
+        # 3. 柱顶横梁（阑额/普拍枋）
+        beam_y = pillar_top - 1
+        if beam_y > platform_h:
+            for col_row in range(column_rows):
+                z = col_row * (self.l - 1) // max(1, column_rows - 1) if column_rows > 1 else self.l // 2
+                self._line_x(0, self.w - 1, beam_y, z, self.mat_trim)
+                self._line_x(0, self.w - 1, beam_y + 1, z, self.mat_accent)
+
+        # 4. 屋顶
+        for tier in range(roof_tiers):
+            tier_top = self.h - 1 - tier
+            if tier_top < platform_h:
+                break
+            overhang = tier * 2
+            x1 = max(0, overhang)
+            z1 = max(0, overhang)
+            x2 = self.w - 1 - overhang
+            z2 = self.l - 1 - overhang
+            if x1 > x2 or z1 > z2:
+                break
+            roof_y = tier_top - (tier * 2)
+            if roof_y < platform_h:
+                roof_y = platform_h + 1
+            self._fill(x1, roof_y, z1, x2, roof_y, z2, self.mat_roof)
+            # 屋顶边缘装饰（滴水瓦当）
+            for x in range(x1, x2 + 1):
+                self._set(x, roof_y, z1, self.mat_accent)
+                self._set(x, roof_y, z2, self.mat_accent)
+            for z in range(z1, z2 + 1):
+                self._set(x1, roof_y, z, self.mat_accent)
+                self._set(x2, roof_y, z, self.mat_accent)
+
+        # 5. 门洞（底部中央清空）
+        if bays > 0:
+            center_bay = bays // 2
+            door_x1 = center_bay * bay_w + column_w
+            door_x2 = door_x1 + bay_w - column_w
+            if door_x2 > self.w - 1:
+                door_x2 = self.w - 1
+            door_h = max(2, platform_h + (self.h - platform_h) // 3)
+            for z in range(self.l):
+                for x in range(door_x1, door_x2 + 1):
+                    for y in range(platform_h, door_h):
+                        self._set(x, y, z, MAT_AIR)
+
+    # ─── 拱门 ───
+
+    def _build_arch(self) -> None:
+        pillar_w = max(2, self.w // 5)
+        opening = self.w - 2 * pillar_w
+        arch_top = max(3, self.h * 2 // 3)
+        for z in range(self.l):
+            for y in range(self.h):
+                for x in range(self.w):
+                    if x < pillar_w or x >= self.w - pillar_w:
+                        self._set(x, y, z, self.mat_pillar)
+                    elif y >= arch_top:
+                        self._set(x, y, z, self.mat_wall)
+        # 拱圈
+        cx = self.w // 2
+        r = opening // 2
+        for z in range(self.l):
+            for dx in range(-r, r + 1):
+                dy = int(math.sqrt(max(0, r * r - dx * dx)))
+                y = arch_top - dy
+                if y >= 0:
+                    self._set(cx + dx, y, z, self.mat_accent)
+
+    # ─── 塔楼 ───
+
+    def _build_tower(self) -> None:
+        bw = min(self.w, self.l)
+        for z in range(self.l):
+            for y in range(self.h):
+                for x in range(self.w):
+                    # 外墙
+                    if x == 0 or x == self.w - 1 or z == 0 or z == self.l - 1:
+                        self._set(x, y, z, self.mat_wall)
+                    # 角落柱
+                    if (x == 0 or x == self.w - 1) and (z == 0 or z == self.l - 1):
+                        self._set(x, y, z, self.mat_pillar)
+
+        # 窗户 - 每面墙开窗
+        spacing = self.style_cfg.get("window_spacing", 3)
+        for y in range(2, self.h - 2, spacing):
+            for z in range(2, self.l - 2, spacing):
+                self._set(0, y, z, MAT_WINDOW)
+                self._set(self.w - 1, y, z, MAT_WINDOW)
+            for x in range(2, self.w - 2, spacing):
+                self._set(x, y, 0, MAT_WINDOW)
+                self._set(x, y, self.l - 1, MAT_WINDOW)
+
+        # 楼层分割线
+        for floor in range(1, self.floors):
+            y = floor * (self.h // self.floors)
+            for z in range(self.l):
+                for x in range(self.w):
+                    if x == 0 or x == self.w - 1 or z == 0 or z == self.l - 1:
+                        self._set(x, y, z, self.mat_trim)
+
+        # 屋顶雉堞（城垛）
+        if self.w > 2 and self.l > 2:
+            for cx in range(0, self.w, 2):
+                for cz in range(0, self.l, 2):
+                    if cx < self.w and cz < self.l:
+                        self._set(cx, self.h - 1, cz, self.mat_accent)
+                        if cz + 1 < self.l:
+                            self._set(cx, self.h - 2, cz + 1, self.mat_roof)
+
+    # ─── 塔 / 阁 ───
+
+    def _build_pagoda(self) -> None:
+        """中式塔楼：多层屋檐、每层内缩"""
+        layers = max(3, self.floors * 2)
+        h_per = self.h // layers
+        for layer in range(layers):
+            shrink = layer
+            y1 = layer * h_per
+            y2 = min(y1 + h_per - 1, self.h - 1)
+            x1, z1 = shrink, shrink
+            x2, z2 = self.w - 1 - shrink, self.l - 1 - shrink
+            if x1 >= x2 or z1 >= z2:
+                break
+            for z in range(z1, z2 + 1):
+                for y in range(y1, y2 + 1):
+                    for x in range(x1, x2 + 1):
+                        if x == x1 or x == x2 or z == z1 or z == z2:
+                            self._set(x, y, z, self.mat_wall)
+            # 每层檐
+            if x1 > 0 and z1 > 0:
+                overhang = 1
+                for z in range(z1 - overhang, z2 + 1 + overhang):
+                    for x in range(x1 - overhang, x2 + 1 + overhang):
+                        if (x < x1 or x > x2 or z < z1 or z > z2) and y2 < self.h:
+                            self._set(x, y2, z, self.mat_roof)
+
+    # ─── 桥 ───
+
+    def _build_bridge(self) -> None:
+        mid = self.h // 2
+        for z in range(self.l):
+            for x in range(self.w):
+                # 桥面
+                self._set(x, mid, z, self.mat_floor)
+                # 栏杆
+                if x == 0 or x == self.w - 1:
+                    for y in range(mid + 1, min(mid + 3, self.h)):
+                        self._set(x, y, z, self.mat_pillar)
+                # 桥拱
+                if self.w > 3:
+                    cx = self.w // 2
+                    for dx in range(-(self.w // 3), self.w // 3 + 1):
+                        y = mid - int(abs(dx) * 0.5)
+                        if y >= 0:
+                            self._set(cx + dx, y, z, self.mat_wall)
+
+    # ─── 通用建筑 ───
+
+    def _build_generic(self) -> None:
+        spacing = self.style_cfg.get("window_spacing", 3)
+        has_pillars = self.style_cfg.get("wall_pillar", False)
+        has_trim = self.style_cfg.get("trim", True)
+        has_windows = any(f.feature_type == "window" for f in self.desc.features)
+
+        self._build_floor()
+
+        wings = self._get_wings()
+        for wing in wings:
+            x1, z1, x2, z2 = wing
+            self._build_wing_walls(x1, z1, x2, z2)
+            if has_windows:
+                self._build_wing_windows(x1, z1, x2, z2, spacing)
+            if has_pillars:
+                self._build_wing_pillars(x1, z1, x2, z2)
+            if has_trim:
+                self._build_wing_trim(x1, z1, x2, z2)
+
+        self._add_door()
+        self._add_roof()
+        self._add_support_columns()
+
+        # 根据 features 添加装饰
+        self._apply_features_decorations()
+
+    # ── 墙壁 ──
 
     def _build_wing_walls(self, wx1: int, wz1: int, wx2: int, wz2: int) -> None:
-        """在指定矩形区域内建造墙壁。"""
         wy1, wy2 = 1, self.h - 2
-        # 前后墙
         for z in (wz1, wz2):
-            self._hollow_fill(wx1, wy1, z, wx2, wy2, z, MAT_WALL)
-        # 左右墙（去掉与前后墙重叠的角）
+            self._hollow_fill(wx1, wy1, z, wx2, wy2, z, self.mat_wall)
         for x in (wx1, wx2):
-            self._hollow_fill(x, wy1, wz1 + 1, x, wy2, wz2 - 1, MAT_WALL)
+            self._hollow_fill(x, wy1, wz1 + 1, x, wy2, wz2 - 1, self.mat_wall)
 
     def _build_wing_windows(self, wx1: int, wz1: int, wx2: int, wz2: int, spacing: int) -> None:
-        """在翼板的墙上开窗。"""
         win_h = min(2, self.h // self.floors - 1)
-        # 前墙
         count = max(1, (wx2 - wx1) // spacing)
         for i in range(count):
             x = wx1 + 1 + (i + 1) * (wx2 - wx1 - 2) // (count + 2)
@@ -207,14 +446,7 @@ class BlockBuilder:
                 yb = 1 + f * (self.h // self.floors)
                 for dy in range(win_h):
                     self._set(x, yb + dy, wz1, MAT_WINDOW)
-        # 后墙
-        for i in range(count):
-            x = wx1 + 1 + (i + 1) * (wx2 - wx1 - 2) // (count + 2)
-            for f in range(self.floors):
-                yb = 1 + f * (self.h // self.floors)
-                for dy in range(win_h):
                     self._set(x, yb + dy, wz2, MAT_WINDOW)
-        # 左墙
         side_count = max(1, (wz2 - wz1) // spacing)
         for i in range(side_count):
             z = wz1 + 1 + (i + 1) * (wz2 - wz1 - 2) // (side_count + 2)
@@ -222,29 +454,21 @@ class BlockBuilder:
                 yb = 1 + f * (self.h // self.floors)
                 for dy in range(win_h):
                     self._set(wx1, yb + dy, z, MAT_WINDOW)
-        # 右墙
-        for i in range(side_count):
-            z = wz1 + 1 + (i + 1) * (wz2 - wz1 - 2) // (side_count + 2)
-            for f in range(self.floors):
-                yb = 1 + f * (self.h // self.floors)
-                for dy in range(win_h):
                     self._set(wx2, yb + dy, z, MAT_WINDOW)
 
     def _build_wing_pillars(self, wx1: int, wz1: int, wx2: int, wz2: int) -> None:
-        """翼板四角加柱。"""
         wy2 = self.h - 2
         for cx, cz in [(wx1, wz1), (wx2, wz1), (wx1, wz2), (wx2, wz2)]:
             for y in range(1, wy2 + 1):
-                self._set(cx, y, cz, MAT_PILLAR)
+                self._set(cx, y, cz, self.mat_pillar)
 
     def _build_wing_trim(self, wx1: int, wz1: int, wx2: int, wz2: int) -> None:
-        """翼板的水平装饰线。"""
         for floor in range(1, self.floors):
             y = floor * (self.h // self.floors)
             for z in range(wz1, wz2 + 1):
                 for x in range(wx1, wx2 + 1):
-                    if (x == wx1 or x == wx2 or z == wz1 or z == wz2):
-                        self._set(x, y, z, MAT_TRIM)
+                    if x == wx1 or x == wx2 or z == wz1 or z == wz2:
+                        self._set(x, y, z, self.mat_trim)
 
     # ── 门 ──
 
@@ -257,7 +481,7 @@ class BlockBuilder:
             for dw in range(2):
                 self._set(dx + dw, 1 + dy, 0, MAT_AIR)
 
-    # ── 屋顶（按类型） ──
+    # ── 屋顶 ──
 
     def _add_roof(self) -> None:
         rt = self.roof_type
@@ -273,16 +497,15 @@ class BlockBuilder:
             self._add_flat_roof()
 
     def _add_flat_roof(self) -> None:
-        self._fill(0, self.h - 1, 0, self.w - 1, self.h - 1, self.l - 1, MAT_ROOF)
+        self._fill(0, self.h - 1, 0, self.w - 1, self.h - 1, self.l - 1, self.mat_roof)
         for x in range(self.w):
-            self._set(x, self.h - 1, 0, MAT_ROOF_EDGE)
-            self._set(x, self.h - 1, self.l - 1, MAT_ROOF_EDGE)
+            self._set(x, self.h - 1, 0, self.mat_accent)
+            self._set(x, self.h - 1, self.l - 1, self.mat_accent)
         for z in range(self.l):
-            self._set(0, self.h - 1, z, MAT_ROOF_EDGE)
-            self._set(self.w - 1, self.h - 1, z, MAT_ROOF_EDGE)
+            self._set(0, self.h - 1, z, self.mat_accent)
+            self._set(self.w - 1, self.h - 1, z, self.mat_accent)
 
     def _add_gable_roof(self) -> None:
-        """三角人字顶（沿 Z 轴起脊）。"""
         half = self.l // 2
         for z in range(self.l):
             dist = abs(z - half)
@@ -291,12 +514,9 @@ class BlockBuilder:
             if ty >= self.h:
                 continue
             for x in range(self.w):
-                self._set(x, ty, z, MAT_ROOF)
-                if ty > self.h - 1:
-                    self._set(x, ty - 1, z, MAT_ROOF)
+                self._set(x, ty, z, self.mat_roof)
 
     def _add_hip_roof(self) -> None:
-        """四坡顶：四个方向同时向内收缩。"""
         cx, cz = self.w // 2, self.l // 2
         max_rise = min(cx, cz, (self.h - 1) // 2)
         for level in range(max_rise + 1):
@@ -310,10 +530,9 @@ class BlockBuilder:
                 break
             for x in range(x1, x2 + 1):
                 for z in range(z1, z2 + 1):
-                    self._set(x, y, z, MAT_ROOF)
+                    self._set(x, y, z, self.mat_roof)
 
     def _add_pyramid_roof(self) -> None:
-        """金字塔顶：每层向内缩 1 格。"""
         cx, cz = self.w // 2, self.l // 2
         max_level = min(cx, cz) + 1
         for level in range(max_level):
@@ -326,10 +545,9 @@ class BlockBuilder:
             z2 = min(self.l - 1, self.l - 1 - level)
             for x in range(x1, x2 + 1):
                 for z in range(z1, z2 + 1):
-                    self._set(x, y, z, MAT_ROOF)
-            # 顶点装饰
+                    self._set(x, y, z, self.mat_roof)
             if x1 == x2 and z1 == z2:
-                self._set(x1, y, z1, MAT_ROOF_EDGE)
+                self._set(x1, y, z1, self.mat_accent)
 
     def _add_dome_roof(self) -> None:
         cx, cz = self.w // 2, self.l // 2
@@ -344,13 +562,13 @@ class BlockBuilder:
                 rise = int(math.sqrt(r * r - dist * dist))
                 y = base_y + rise
                 if y < self.h:
-                    self._set(x, y, z, MAT_ROOF)
+                    self._set(x, y, z, self.mat_roof)
                     for fy in range(base_y + 1, y):
-                        self._set(x, fy, z, MAT_ROOF)
+                        self._set(x, fy, z, self.mat_roof)
         tx, tz = cx, cz
         ty = base_y + r
         if ty < self.h:
-            self._set(tx, ty, tz, MAT_ROOF_EDGE)
+            self._set(tx, ty, tz, self.mat_accent)
 
     # ── 支撑柱 ──
 
@@ -360,81 +578,73 @@ class BlockBuilder:
         cx, cz = self.w // 2, self.l // 2
         for y in range(1, self.h - 2):
             for dx, dz in [(0, 0), (1, 0), (0, 1), (1, 1)]:
-                self._set(cx + dx, y, cz + dz, MAT_PILLAR)
+                self._set(cx + dx, y, cz + dz, self.mat_pillar)
 
-    # ── 翼板元组（用于 L / Cross 形状） ──
+    # ── 装饰特征 ──
+
+    def _apply_features_decorations(self) -> None:
+        for f in self.desc.features:
+            ft = f.feature_type
+            if ft == "column" or ft == "pillar":
+                self._decorate_pillar(f)
+            elif ft == "arch":
+                self._decorate_arch(f)
+            elif ft == "balcony":
+                self._decorate_balcony(f)
+            elif ft == "tower":
+                self._decorate_turret(f)
+
+    def _decorate_pillar(self, feature) -> None:
+        pos = feature.position or "front"
+        count = min(feature.count, 4)
+        step = max(2, self.w // (count + 1))
+        for i in range(count):
+            x = (i + 1) * step
+            if x >= self.w - 1:
+                x = self.w - 2
+            z = 0 if pos in ("front", "center") else self.l - 1
+            for y in range(1, min(self.h - 2, 6)):
+                self._set(x, y, z, self.mat_accent)
+
+    def _decorate_arch(self, feature) -> None:
+        cx = self.w // 2
+        r = min(self.w, self.l) // 4
+        z = 0
+        for dx in range(-r, r + 1):
+            dy = int(math.sqrt(max(0, r * r - dx * dx)))
+            for dz in range(min(2, self.l)):
+                y = self.h // 2
+                self._set(cx + dx, y + dy, dz, self.mat_accent)
+
+    def _decorate_balcony(self, feature) -> None:
+        y = self.h // 2
+        for x in range(1, self.w - 1):
+            self._set(x, y, 0, self.mat_floor)
+            self._set(x, y + 1, 0, self.mat_accent)
+
+    def _decorate_turret(self, feature) -> None:
+        for dz in range(min(2, self.l)):
+            for dx in range(min(2, self.w)):
+                cx = self.w - 1 - dx
+                cz = self.l - 1 - dz
+                for y in range(self.h - 3, self.h):
+                    self._set(cx, y, cz, self.mat_pillar)
+
+    # ── 翼板 ──
 
     def _get_wings(self) -> list[tuple[int, int, int, int]]:
-        """返回 [(x1, z1, x2, z2), ...] 每个翼板的矩形范围。"""
         shape = self.shape
         if shape == "L":
-            # 主翼: 全宽 x 大部分长；侧翼: 大部分宽 x 完整长
             mw = self.w // 2
             ml = self.l * 2 // 3
-            return [
-                (0, 0, self.w - 1, ml - 1),
-                (0, 0, mw - 1, self.l - 1),
-            ]
+            return [(0, 0, self.w - 1, ml - 1), (0, 0, mw - 1, self.l - 1)]
         elif shape == "cross":
-            # 十字：横翼 + 纵翼
             cw = self.w // 3
             cl = self.l // 3
-            return [
-                (0, cl, self.w - 1, self.l - 1 - cl),
-                (cw, 0, self.w - 1 - cw, self.l - 1),
-            ]
+            return [(0, cl, self.w - 1, self.l - 1 - cl), (cw, 0, self.w - 1 - cw, self.l - 1)]
         elif shape == "T":
             tw = self.w * 2 // 3
             tl = self.l // 3
-            return [
-                (0, tl, self.w - 1, self.l - 1),
-                ((self.w - tw) // 2, 0, (self.w - tw) // 2 + tw - 1, tl - 1),
-            ]
+            return [(0, tl, self.w - 1, self.l - 1), ((self.w - tw) // 2, 0, (self.w - tw) // 2 + tw - 1, tl - 1)]
         else:
             return [(0, 0, self.w - 1, self.l - 1)]
-
-    # ── 主构建入口 ──
-
-    def build(self) -> BlockStructure:
-        self._grid = [
-            [[self._idx(MAT_AIR) for _ in range(self.w)] for _ in range(self.h)]
-            for _ in range(self.l)
-        ]
-
-        wings = self._get_wings()
-        spacing = self.style_cfg.get("window_spacing", 3)
-        has_pillars = self.style_cfg.get("wall_pillar", False)
-        has_trim = self.style_cfg.get("trim", True)
-
-        self._build_floor()
-
-        for wing in wings:
-            x1, z1, x2, z2 = wing
-            self._build_wing_walls(x1, z1, x2, z2)
-            self._build_wing_windows(x1, z1, x2, z2, spacing)
-            if has_pillars:
-                self._build_wing_pillars(x1, z1, x2, z2)
-            if has_trim:
-                self._build_wing_trim(x1, z1, x2, z2)
-
-        # 门和屋顶在整个建筑范围上处理
-        self._add_door()
-
-        # 屋顶只处理非凹陷区域
-        self._add_roof()
-        self._add_support_columns()
-
-        # 展平 Z→Y→X
-        flat: list[int] = []
-        for z in range(self.l):
-            for y in range(self.h):
-                for x in range(self.w):
-                    flat.append(self._grid[z][y][x])
-
-        return BlockStructure(
-            palette=self._palette_list,
-            blocks=flat,
-            size_x=self.w,
-            size_y=self.h,
-            size_z=self.l,
-        )

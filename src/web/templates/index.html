@@ -25,7 +25,7 @@
         </div>
         <p class="upload-text">拖拽图片到这里，或 <span class="link">点击选择</span></p>
         <p class="upload-hint">支持多张照片（不同角度），JPG / PNG / WebP</p>
-        <input type="file" name="images" id="fileInput" accept="image/*" multiple hidden>
+        <input type="file" name="images" id="fileInput" accept="image/*" hidden>
         <div id="filePreview" class="file-preview hidden">
           <div class="preview-list" id="previewList"></div>
         </div>
@@ -43,7 +43,8 @@
 
       <div class="options">
         <label for="apiKey">API Key <span class="hint">(必填走 AI+Wikipedia 增强分析，不填用 Mock)</span></label>
-        <input type="password" name="api_key" id="apiKey" placeholder="智谱 GLM-4V-Flash API Key">
+        <input type="password" name="api_key" id="apiKey" placeholder="智谱 GLM-4V-Flash API Key" value="{{ default_api_key }}">
+        <p class="api-hint">启动命令：<code>$env:ZHIPU_API_KEY="你的Key"; Start-Process powershell "-NoExit & 'C:\Users\12190\AppData\Local\Programs\Python\Python314\python.exe' -m uvicorn src.web.app:app --host 0.0.0.0 --port 8000"; Start-Sleep 3; Start-Process http://127.0.0.1:8000</code></p>
       </div>
 
       <button type="submit" id="submitBtn" disabled>

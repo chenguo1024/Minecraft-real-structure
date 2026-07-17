@@ -1,14 +1,8 @@
-"""FastAPI Web 应用 —— 提供图片上传和结构文件下载的界面。
-
-设计理由：
-  1. 使用 FastAPI + Jinja2 模板渲染，不走前后端分离。
-  2. 支持多张照片上传（不同角度），AI + Wikipedia 融合分析。
-  3. 上传的图片存到 data/uploads/，生成的 .nbt 存到 data/structures/。
-"""
-
 from __future__ import annotations
 
+import shutil
 import uuid
+import traceback
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
@@ -27,6 +21,7 @@ TEMPLATES_DIR = HERE / "templates"
 STATIC_DIR = HERE / "static"
 UPLOAD_DIR = Path("data/uploads")
 STRUCTURES_DIR = Path("data/structures")
+MINECRAFT_STRUCTURES_DIR = Path("D:/Plain Craft Launcher 2/.minecraft/versions/1.20/saves/新的世界/generated/minecraft/structures")
 
 app = FastAPI(title="Minecraft Real Structure", version="0.2.0")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -34,7 +29,6 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 def _render(name: str, **context) -> HTMLResponse:
     from jinja2 import Environment, FileSystemLoader
-
     env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)))
     template = env.get_template(name)
     return HTMLResponse(template.render(**context))
@@ -42,56 +36,63 @@ def _render(name: str, **context) -> HTMLResponse:
 
 @app.get("/", response_class=HTMLResponse)
 async def home():
-    return _render("index.html")
+    import os
+    default_key = os.environ.get("ZHIPU_API_KEY", "")
+    return _render("index.html", default_api_key=default_key)
 
 
 @app.post("/analyze")
 async def analyze(
     request: Request,
-    images: list[UploadFile] = File(...),
+    images: UploadFile = File(...),
     version: str = Form("java-1.20"),
     api_key: str | None = Form(None),
 ):
-    """上传一张或多张照片（不同角度） → AI 分析 → Wikipedia 查证 → 生成 → 下载。
-
-    多张照片从不同角度分析后融合结果，Wikipedia 提供真实尺寸数据。
-    不填 API Key 时使用 Mock 分析器（固定模板）。
-    """
+    """上传一张或多张照片 → AI 分析 → Wikipedia 查证 → 生成 → 下载。"""
     try:
         mc_version = MinecraftVersion(version)
     except ValueError:
         raise HTTPException(status_code=400, detail=f"不支持的版本: {version}")
 
-    # 保存上传图片
     file_id = uuid.uuid4().hex[:12]
     image_paths = []
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-    for img in images:
-        ext = Path(img.filename or "unknown").suffix or ".jpg"
-        img_path = UPLOAD_DIR / f"{file_id}_{len(image_paths)}{ext}"
-        content = await img.read()
-        img_path.write_bytes(content)
-        image_paths.append(str(img_path))
+    ext = Path(images.filename or "unknown").suffix or ".jpg"
+    img_path = UPLOAD_DIR / f"{file_id}_0{ext}"
+    content = await images.read()
+    img_path.write_bytes(content)
+    image_paths.append(str(img_path))
 
-    # 分析（增强模式：多角度 + Wikipedia，或 Mock）
-    if api_key:
-        desc = enhanced_analyze(image_paths, mc_version, api_key=api_key)
-    else:
-        # Mock 只分析第一张
-        desc = mock_analyze(image_paths[0], mc_version)
+    try:
+        if api_key:
+            desc = enhanced_analyze(image_paths, mc_version, api_key=api_key)
+        else:
+            desc = mock_analyze(image_paths[0], mc_version)
+    except Exception as e:
+        tb = traceback.format_exc()
+        return _render(
+            "error.html",
+            error=str(e),
+            detail=tb,
+        )
 
-    # 生成
     builder = BlockBuilder(desc)
     structure = builder.build()
 
-    # 导出
     nbt_filename = f"{file_id}.nbt"
     nbt_path = STRUCTURES_DIR / nbt_filename
     STRUCTURES_DIR.mkdir(parents=True, exist_ok=True)
     export_nbt(structure, nbt_path, mc_version)
 
-    # 返回
+    # 自动拷贝到 Minecraft 结构文件夹
+    try:
+        mc_path = MINECRAFT_STRUCTURES_DIR / nbt_filename
+        MINECRAFT_STRUCTURES_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(nbt_path), str(mc_path))
+    except Exception:
+        pass
+
     accept = request.headers.get("accept", "")
     is_json = "application/json" in accept
 

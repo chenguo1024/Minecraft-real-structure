@@ -68,11 +68,13 @@ class TestNBTExport:
         assert nbt_file["DataVersion"] == 3465
         assert len(nbt_file["palette"]) == 2
         assert str(nbt_file["palette"][0]["Name"]) == "minecraft:stone"
-        assert len(nbt_file["blocks"]) == 9
+        blocks = list(nbt_file["blocks"])
+        assert len(blocks) == 5  # 9 total - 4 air = 5 non-air
+        assert len(blocks) < 9  # 空气方块不写入
 
-        first = nbt_file["blocks"][0]
-        assert list(first["pos"]) == [0, 0, 0]
-        assert first["state"] == 0
+        first = blocks[0]
+        assert list(first["pos"]) == [1, 0, 0]
+        assert first["state"] == 1  # 非空气
 
     def test_version_affects_data_version(self, tmp_path: Path):
         s = self._small_structure()
@@ -96,7 +98,8 @@ class TestNBTExport:
         nbt_file = nbtlib.load(str(out))
         blocks = nbt_file["blocks"]
         sx, sy, sz = list(nbt_file["size"])
-        assert len(blocks) == sx * sy * sz
+        assert len(blocks) < sx * sy * sz  # 空气方块不写入
+        assert len(blocks) > 0
 
     def test_large_structure_exports(self, tmp_path: Path):
         palette = ["minecraft:air", "minecraft:stone"]

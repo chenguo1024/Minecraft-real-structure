@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分析出错 - Minecraft Real Structure</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>分析出错</h1>
+    <p class="subtitle">AI 分析过程中遇到问题</p>
+  </header>
+
+  <main>
+    <section class="card error-card">
+      <h2>错误信息</h2>
+      <pre class="error-message">{{ error }}</pre>
+    </section>
+
+    {% if detail %}
+    <details>
+      <summary>技术详情</summary>
+      <pre class="error-detail">{{ detail }}</pre>
+    </details>
+    {% endif %}
+
+    <div class="actions">
+      <a href="/" class="btn btn-secondary">← 返回重试</a>
+    </div>
+  </main>
+
+  <footer>
+    <p>开源项目 · <a href="https://github.com/chenguo1024/Minecraft-real-structure" target="_blank">GitHub</a></p>
+  </footer>
+</div>
+</body>
+</html>

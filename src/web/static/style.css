@@ -85,6 +85,8 @@ h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
 }
 .options label { font-size: 0.9rem; color: var(--muted); }
 .options .hint { font-size: 0.75rem; color: var(--muted); font-weight: normal; }
+.api-hint { font-size: 0.7rem; color: var(--muted); margin-top: 0.25rem; word-break: break-all; }
+.api-hint code { font-size: 0.65rem; background: rgba(255,255,255,0.05); padding: 0.1rem 0.3rem; border-radius: 2px; }
 .options input[type="password"], .options input[type="text"] {
   flex: 1;
   background: var(--card);
@@ -234,6 +236,12 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   border-radius: 4px;
   vertical-align: middle;
 }
+
+/* ── 警告框 ── */
+.alert { padding: 1rem; border-radius: 8px; margin-top: 1rem; font-size: 0.85rem; line-height: 1.6; text-align: left; width: 100%; }
+.alert-warning { background: rgba(255, 200, 0, 0.1); border: 1px solid rgba(255, 200, 0, 0.3); color: #ffd700; }
+.alert code { background: rgba(0,0,0,0.3); padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.8rem; }
+.alert-info { background: rgba(100, 150, 255, 0.1); border: 1px solid rgba(100, 150, 255, 0.3); color: #88bbff; }
 
 /* ── 页脚 ── */
 footer {

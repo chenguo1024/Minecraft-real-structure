@@ -25,7 +25,9 @@ class TestFullPipeline:
 
         size = list(nbt_file["size"])
         assert size == [8, 10, 12]
-        assert len(nbt_file["blocks"]) == 8 * 10 * 12
+        blocks = list(nbt_file["blocks"])
+        assert len(blocks) < 8 * 10 * 12  # 空气方块不写入
+        assert len(blocks) > 0
         assert nbt_file["DataVersion"] == 3465
 
     def test_pipeline_church(self, tmp_path: Path):
@@ -74,4 +76,6 @@ class TestFullPipeline:
 
         nbt_file = nbtlib.load(str(out))
         sx, sy, sz = list(nbt_file["size"])
-        assert len(nbt_file["blocks"]) == sx * sy * sz
+        total = sx * sy * sz
+        blocks = list(nbt_file["blocks"])
+        assert 0 < len(blocks) < total  # 空气方块不写入
