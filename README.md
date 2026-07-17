@@ -20,7 +20,7 @@
 | 方块生成 | Python + 颜色分组 BlockMap | 根据描述生成三维方块数组 |
 | NBT 导出 | 手写 NBT 二进制 (GZip) | 写入 Minecraft 结构文件 |
 | Web | FastAPI + Uvicorn + Jinja2 | HTTP 上传界面 |
-| 测试 | pytest (115 个测试) | 全链路测试覆盖 |
+| 测试 | pytest (118 个测试) | 全链路测试覆盖 |
 
 ## 项目结构
 
@@ -62,22 +62,77 @@ minecraft-real-structure/
 
 ## 快速开始
 
+> Windows + Python 3.10+。统一用 `py -3` 调用解释器——本机 `python` 会指向 msys64 的解释器（没装 pytest）。
+
+### 0. 安装
+
 ```powershell
-# 克隆仓库
 git clone git@github.com:chenguo1024/Minecraft-real-structure.git
 cd minecraft-real-structure
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 启动 Web 界面（自动打开浏览器）
-$env:ZHIPU_API_KEY="你的智谱API Key"
-Start-Process powershell "-NoExit & 'C:\Users\你的用户名\AppData\Local\Programs\Python\Python314\python.exe' -m uvicorn src.web.app:app --host 0.0.0.0 --port 8000"
-Start-Sleep 3; Start-Process http://127.0.0.1:8000
-
-# 或在游戏目录直接生成
-py -3 -m src.main mock --image photo.jpg --version java-1.20
+py -3 -m pip install -r requirements.txt
 ```
+
+### A. Web 界面（最常用）
+
+```powershell
+# 只有用 AI 分析才需要 Key；Mock 模式不需要
+$env:ZHIPU_API_KEY = "你的智谱API Key"
+
+# 启动服务（前台进程，Ctrl+C 退出）
+py -3 -m uvicorn src.web.app:app --host 0.0.0.0 --port 8000
+```
+
+浏览器打开 <http://127.0.0.1:8000>：
+1. 上传建筑照片（支持多图多角度）
+2. SSE 实时推送进度（上传 → AI 分析 → 查 Wikipedia → 生成 → 导出），页面不再转圈无反馈
+3. 结果页：Three.js InstancedMesh 3D 预览 + 全参数表单
+4. 微调参数 → 点「重新生成」只走生成器，不再花钱调 AI（端点 `/regenerate`）
+5. 下载 `.nbt`
+
+> ⚠️ **存档目录硬编码**：`src/web/app.py` 第 24 行写死了 `D:/Plain Craft Launcher 2/.minecraft/versions/1.20/saves/新的世界/generated/minecraft/structures`。你的游戏装别处就改这行；不改也行——文件仍会落到 `data/structures/`，自己复制即可。
+
+### B. 命令行 AI 分析
+
+```powershell
+$env:ZHIPU_API_KEY = "你的智谱API Key"
+py -3 -m src.main analyze -i photo.jpg -v java-1.20 -o data/structures/mybuilding.nbt
+```
+
+`-v` 默认 `java-1.20`，可选 `java-1.12 / 1.13 / 1.17 / 1.20`；`-o` 默认 `data/structures/<图片名>.nbt`。
+
+### C. Mock 分析（不调 AI，验证管线用）
+
+无需 Key，用固定模板数据跑完整流程，改完代码快速验证：
+
+```powershell
+py -3 -m src.main mock -i photo.jpg -v java-1.20
+# 输出到 data/structures/<图片名>_mock.nbt
+```
+
+### 把 .nbt 放进游戏
+
+| 大小 | 方式 |
+|---|---|
+| ≤48×48×48 | `/give @s structure_block`，模式 LOAD，输入文件名（不带 `.nbt`） |
+| 任意大小 ≤128³ | 游内按 T：`/place template minecraft:文件名`（文件需在 `<存档>/generated/minecraft/structures/` 下） |
+
+超过 48³ 会在生成时打印 warning 提示改用 `/place template`。
+
+### 跑测试
+
+```powershell
+py -3 -m pytest tests/ -q
+# 期望：118 passed
+```
+
+`pyproject.toml` 已配 `-p no:cacheprovider -q`，不需要额外参数。常见报错：
+
+| 症状 | 原因 | 解决 |
+|---|---|---|
+| `python: No module named pytest` | 用了 msys64 的 `python` | 改用 `py -3` |
+| `PermissionError [Errno 13]` 写文件被拒 | 当前会话非管理员，仓库目录 ACL = Users RX | 管理员身份启动 PowerShell / opencode |
+| `.pytest_cache` WinError 183 | 不同 pytest 版本 cache 残留冲突 | `Remove-Item -LiteralPath .pytest_cache -Recurse -Force` 重跑 |
+| `pytest-of-<用户>` Temp 权限拒绝 | pytest 扫不到自己建的临时目录 | 加 `--basetemp=C:\Users\<你>\AppData\Local\Temp\opencode\pytest` |
 
 ## 核心功能
 
