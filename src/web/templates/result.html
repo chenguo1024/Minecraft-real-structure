@@ -61,6 +61,93 @@
           {% endfor %}
         </ol>
       </section>
+
+      <section class="card card-wide">
+        <h2>3D 预览</h2>
+        <div id="three-preview" style="width:100%;height:400px;background:#1a1a2e;border-radius:8px;overflow:hidden;position:relative;">
+          <div id="loading-preview" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#888;">加载中...</div>
+        </div>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+        <script>
+        (function() {
+          var sizeX = {{ size_x }}, sizeY = {{ size_y }}, sizeZ = {{ size_z }};
+          var blocks = {{ blocks_json }};
+          var palette = {{ palette | tojson }};
+
+          var maxDim = Math.max(sizeX, sizeY, sizeZ);
+          var scale = 40 / maxDim;
+          var container = document.getElementById('three-preview');
+          document.getElementById('loading-preview').style.display = 'none';
+
+          var scene = new THREE.Scene();
+          scene.background = new THREE.Color(0x1a1a2e);
+
+          var camera = new THREE.PerspectiveCamera(45, container.clientWidth / 400, 0.1, 1000);
+          camera.position.set(maxDim * 1.5, maxDim * 1.2, maxDim * 1.5);
+
+          var renderer = new THREE.WebGLRenderer({ antialias: true });
+          renderer.setSize(container.clientWidth, 400);
+          renderer.shadowMap.enabled = true;
+          container.appendChild(renderer.domElement);
+
+          var controls = new THREE.OrbitControls(camera, renderer.domElement);
+          controls.target.set(sizeX / 2, sizeY / 2, sizeZ / 2);
+
+          var colors = {
+            'air': null,
+            'stone_bricks': 0x888888, 'oak_planks': 0xc8a35a, 'glass': 0x88ccff,
+            'polished_andesite': 0xaaaaaa, 'chiseled_stone_bricks': 0x666666,
+            'red_terracotta': 0xb84c3e, 'white_concrete': 0xffffff,
+            'quartz_block': 0xeeeeee, 'gold_block': 0xffcc44,
+            'bricks': 0xbb6644, 'cobblestone': 0x777777,
+            'spruce_planks': 0x8b5e3c, 'dark_oak_planks': 0x4a3018,
+          };
+          function getColor(name) {
+            var key = name.replace('minecraft:', '');
+            if (colors[key] !== undefined) return colors[key];
+            return 0x88aa88;
+          }
+
+          var geom = new THREE.BoxGeometry(scale * 0.95, scale * 0.95, scale * 0.95);
+
+          for (var z = 0; z < sizeZ; z++) {
+            for (var y = 0; y < sizeY; y++) {
+              for (var x = 0; x < sizeX; x++) {
+                var idx = x + y * sizeX + z * sizeX * sizeY;
+                var palIdx = blocks[idx];
+                if (palIdx === 0) continue;
+                var matName = palette[palIdx];
+                if (matName.indexOf('air') !== -1) continue;
+                var color = getColor(matName);
+                var mat = new THREE.MeshLambertMaterial({ color: color });
+                var mesh = new THREE.Mesh(geom, mat);
+                mesh.position.set(x * scale, y * scale, z * scale);
+                scene.add(mesh);
+              }
+            }
+          }
+
+          var ambient = new THREE.AmbientLight(0x404060);
+          scene.add(ambient);
+          var dir = new THREE.DirectionalLight(0xffffff, 1);
+          dir.position.set(1, 2, 1);
+          scene.add(dir);
+          var dir2 = new THREE.DirectionalLight(0x8888ff, 0.3);
+          dir2.position.set(-1, 0.5, -1);
+          scene.add(dir2);
+
+          controls.update();
+
+          function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+          }
+          animate();
+        })();
+        </script>
+      </section>
     </div>
 
     <div class="actions">
@@ -78,6 +165,24 @@
       </div>
       {% endif %}
       <a href="/" class="btn btn-secondary">← 再生成一个</a>
+
+      <section class="card card-wide" style="margin-top:20px;">
+        <h2>手动调整参数</h2>
+        <form action="/regenerate" method="post" class="tune-form">
+          <input type="hidden" name="task_id" value="{{ task_id }}">
+          <div class="tune-grid">
+            <label>宽度: <input type="number" name="width" value="{{ size_x }}" min="1" max="128"></label>
+            <label>高度: <input type="number" name="height" value="{{ size_y }}" min="1" max="128"></label>
+            <label>深度: <input type="number" name="length" value="{{ size_z }}" min="1" max="128"></label>
+            <label>楼层: <input type="number" name="floors" value="{{ desc.floors }}" min="1" max="50"></label>
+            <label>精细度: <input type="number" name="detail_scale" value="{{ desc.detail_scale }}" min="1" max="8"></label>
+            <label>风格: <input type="text" name="style" value="{{ desc.style }}"></label>
+            <label>建筑类型: <input type="text" name="building_type" value="{{ desc.building_type }}"></label>
+            <label>屋顶样式: <input type="text" name="roof_type" value="{{ roof_type }}" placeholder="flat/gable/hip/pyramid/dome/xieshan/curved/eaved"></label>
+          </div>
+          <button type="submit" class="btn btn-primary">重新生成</button>
+        </form>
+      </section>
     </div>
 
     {% if desc.description %}

@@ -37,6 +37,45 @@ class BuildingFeature(BaseModel):
     count: int = Field(default=1, ge=0, description="数量")
 
 
+class FaceWindow(BaseModel):
+    """立面上的窗户描述"""
+
+    x: float = Field(description="窗户在立面上的水平位置（0~1 比例）")
+    width: float = Field(default=0.15, description="窗户宽度（0~1 比例）")
+    height: int = Field(default=2, description="窗户高度（方块数）")
+    y_offset: int = Field(default=1, description="离地高度（方块数）")
+
+
+class FaceOpening(BaseModel):
+    """立面上的开口（门洞/拱门）"""
+
+    x: float = Field(description="开口水平位置（0~1 比例）")
+    width: float = Field(default=0.2, description="开口宽度（0~1 比例）")
+    height: int = Field(default=3, description="开口高度（方块数）")
+    style: str = Field(default="rectangle", description="开口样式: rectangle/arch")
+
+
+class Facade(BaseModel):
+    """建筑单个立面的描述"""
+
+    face: str = Field(description="立面方向: front/back/left/right")
+    material: str = Field(default="", description="该面墙的材质，空则用全局材料")
+    columns: list[float] = Field(
+        default_factory=list,
+        description="立柱水平位置列表（0~1 比例），如 [0.1, 0.5, 0.9]",
+    )
+    windows: list[FaceWindow] = Field(
+        default_factory=list,
+        description="窗户列表",
+    )
+    openings: list[FaceOpening] = Field(
+        default_factory=list,
+        description="开口列表（门洞/拱门）",
+    )
+    railings: bool = Field(default=False, description="是否有栏杆/护栏")
+    cornice: bool = Field(default=False, description="是否有檐口线脚")
+
+
 class BuildingDescription(BaseModel):
     """
     AI 分析后的建筑结构化描述。
@@ -67,4 +106,8 @@ class BuildingDescription(BaseModel):
     bays: int | None = Field(default=None, description="开间数（正面柱间数量），如天安门 9 间，常见 1/3/5/7/9")
     roof_tiers: int | None = Field(default=None, description="屋顶层数/重檐数，如天安门重檐=2，普通建筑=1")
     platform_height: int | None = Field(default=None, description="台基/基座高度（方块数），如天安门的城台")
+    facades: list[Facade] = Field(
+        default_factory=list,
+        description="各立面详细描述。空列表时生成器使用对称逻辑代替。",
+    )
     description: str = Field(default="", description="AI 生成的额外文字描述")

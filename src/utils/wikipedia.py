@@ -30,6 +30,9 @@ INFOBOX_FIELDS = {
     "width": ["width", "宽度"],
     "length": ["length", "长度", "进深"],
     "area": ["area", "建筑面积", "占地面积"],
+    "bays": ["bays", "bay", "开间", "间数", "span"],
+    "columns": ["columns", "column", "柱子", "立柱", "pillars"],
+    "roof_style": ["roof", "roof style", "屋顶", "屋顶形式", "屋面"],
 }
 
 
@@ -196,6 +199,37 @@ def lookup_building(name: str) -> dict | None:
         f = _extract_floor_count(result["floor_count"])
         if f:
             result["floor_count_int"] = f
+
+    # 提取开间数
+    if "bays" in result:
+        b = _extract_floor_count(result["bays"])
+        if b:
+            result["bays_int"] = b
+
+    # 提取柱子数
+    if "columns" in result:
+        c = _extract_floor_count(result["columns"])
+        if c:
+            result["columns_int"] = c
+
+    # 从摘要中推理开间数（中文描述如 "面阔九间"）
+    if summary and "bays_int" not in result:
+        bay_patterns = [
+            r'面阔[八九七六五四三二一零]+[间]',
+            r'[八九七六五四三二一零]+[间]',
+        ]
+        for pat in bay_patterns:
+            m = re.search(pat, summary)
+            if m:
+                num_text = re.search(r'[八九七六五四三二一零\d]+', m.group())
+                if num_text:
+                    cn_nums = {"八": 8, "九": 9, "七": 7, "六": 6, "五": 5,
+                               "四": 4, "三": 3, "二": 2, "一": 1, "零": 0}
+                    text = num_text.group()
+                    if text.isdigit():
+                        result["bays_int"] = int(text)
+                    elif text in cn_nums:
+                        result["bays_int"] = cn_nums[text]
 
     return result
 

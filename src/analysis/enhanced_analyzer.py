@@ -50,6 +50,15 @@ def _merge_descriptions(descs: list[BuildingDescription]) -> BuildingDescription
         if d.description:
             base.description += f"\n--- 另一角度 ---\n{d.description}"
 
+        # 合并 facades（按方向去重，后相同方向覆盖前）
+        if d.facades:
+            existing_faces = {f.face for f in base.facades}
+            for f in d.facades:
+                if f.face in existing_faces:
+                    base.facades = [x for x in base.facades if x.face != f.face]
+                base.facades.append(f)
+                existing_faces.add(f.face)
+
     return base
 
 

@@ -154,6 +154,62 @@ class BlockBuilder:
     def _is_air(self, x: int, y: int, z: int) -> bool:
         return self._get(x, y, z) == self._idx(MAT_AIR)
 
+    # ═══════════════════════════════════════════════════════════════
+    #  曲线/圆形辅助方法
+    # ═══════════════════════════════════════════════════════════════
+
+    def _circle_xz(self, cx: int, cz: int, r: int, y: int, mat: str,
+                   fill: bool = False) -> None:
+        """在 XZ 平面画一个圆环（或实心圆）。
+        
+        Args:
+            cx, cz: 圆心坐标
+            r: 半径
+            y: Y 高度
+            mat: 方块材料
+            fill: True=实心圆, False=空心圆环
+        """
+        for dz in range(-r, r + 1):
+            z = cz + dz
+            if z < 0 or z >= self.l:
+                continue
+            dx_max = int(math.sqrt(max(0, r * r - dz * dz)))
+            for dx in range(-dx_max, dx_max + 1):
+                x = cx + dx
+                if x < 0 or x >= self.w:
+                    continue
+                if fill or abs(dx) == dx_max or abs(dz) == r:
+                    self._set(x, y, z, mat)
+
+    def _cylinder_y(self, cx: int, cz: int, r: int,
+                    y1: int, y2: int, mat: str, fill: bool = False) -> None:
+        """构建垂直圆柱体。"""
+        for y in range(max(0, y1), min(self.h, y2 + 1)):
+            self._circle_xz(cx, cz, r, y, mat, fill=fill)
+
+    def _arch_curve(self, cx: int, cz: int, r: int,
+                    y_base: int, height: int, mat: str, thick: int = 1) -> None:
+        """构建拱形曲线（半圆拱）。
+        
+        Args:
+            cx, cz: 拱的中心点 XZ
+            r: 拱的半径
+            y_base: 拱底 Y
+            height: 拱高
+            mat: 材料
+            thick: 厚度
+        """
+        for angle in range(0, 181, 5):
+            rad = math.radians(angle)
+            dy = int(height * math.sin(rad))
+            dx = int(r * math.cos(rad))
+            y = y_base + dy
+            if y >= self.h:
+                break
+            for t in range(thick):
+                self._set(cx + dx + t, y, cz, mat)
+                self._set(cx - dx - t, y, cz, mat)
+
     # ── 屋顶类型 ──
 
     def _resolve_roof_type(self) -> str:
@@ -179,19 +235,23 @@ class BlockBuilder:
             for _ in range(self.l)
         ]
 
-        btype = self.desc.building_type
-        if btype == "gate":
-            self._build_gate()
-        elif btype == "arch":
-            self._build_arch()
-        elif btype == "tower":
-            self._build_tower()
-        elif btype == "pagoda":
-            self._build_pagoda()
-        elif btype == "bridge":
-            self._build_bridge()
+        # 如果 AI 提供了逐面描述，使用 facade 生成器（覆盖所有建筑类型）
+        if self.desc.facades:
+            self._build_from_facades()
         else:
-            self._build_generic()
+            btype = self.desc.building_type
+            if btype == "gate":
+                self._build_gate()
+            elif btype == "arch":
+                self._build_arch()
+            elif btype == "tower":
+                self._build_tower()
+            elif btype == "pagoda":
+                self._build_pagoda()
+            elif btype == "bridge":
+                self._build_bridge()
+            else:
+                self._build_generic()
 
         flat: list[int] = []
         for z in range(self.l):
@@ -421,12 +481,133 @@ class BlockBuilder:
             if has_trim:
                 self._build_wing_trim(x1, z1, x2, z2)
 
+        if self.desc.facades:
+            self._build_from_facades()
+            return
+
         self._add_door()
         self._add_roof()
         self._add_support_columns()
-
-        # 根据 features 添加装饰
+        self._build_interior()
         self._apply_features_decorations()
+
+    def _build_from_facades(self) -> None:
+        """根据 AI 输出的逐面描述构建建筑（取代对称默认逻辑）。"""
+        self._build_floor()
+        facades = {f.face: f for f in self.desc.facades}
+        for face_name in ("front", "back", "left", "right"):
+            self._build_facade_wall(face_name, facades.get(face_name))
+        for face_name in ("front", "back", "left", "right"):
+            facade = facades.get(face_name)
+            if facade:
+                self._add_facade_windows(facade, face_name)
+                self._add_facade_openings(facade, face_name)
+                if facade.railings:
+                    self._add_facade_railings(facade, face_name)
+        self._add_roof()
+        self._apply_features_decorations()
+
+    def _face_fixed(self, face_name: str) -> int:
+        return {"front": 0, "back": self.l - 1, "left": 0, "right": self.w - 1}[face_name]
+
+    def _face_fixed_axis(self, face_name: str) -> str:
+        return {"front": "z", "back": "z", "left": "x", "right": "x"}[face_name]
+
+    def _face_span_max(self, face_name: str) -> int:
+        return {"front": self.w - 1, "back": self.w - 1, "left": self.l - 1, "right": self.l - 1}[face_name]
+
+    def _build_facade_wall(self, face_name: str, facade) -> None:
+        """构建单个立面的实心墙（不含窗户/开口）。"""
+        fixed = self._face_fixed(face_name)
+        span_max = self._face_span_max(face_name)
+        material = facade.material if (facade and facade.material) else self.mat_wall
+        wy1, wy2 = 1, self.h - 2
+        axis = self._face_fixed_axis(face_name)
+        if axis == "z":
+            for z in (fixed,):
+                self._hollow_fill(0, wy1, z, span_max, wy2, z, material)
+        else:
+            for x in (fixed,):
+                self._hollow_fill(x, wy1, 0, x, wy2, span_max, material)
+        # 立柱
+        if facade and facade.columns:
+            for col_f in facade.columns:
+                col_pos = int(col_f * span_max)
+                if axis == "z":
+                    for y in range(wy1, wy2 + 1):
+                        self._set(col_pos, y, fixed, self.mat_pillar)
+                else:
+                    for y in range(wy1, wy2 + 1):
+                        self._set(fixed, y, col_pos, self.mat_pillar)
+        # 檐口线脚
+        if facade and facade.cornice:
+            if axis == "z":
+                self._line_x(0, span_max, wy2 + 1, fixed, self.mat_trim)
+            else:
+                self._line_z(0, span_max, fixed, wy2 + 1, self.mat_trim)
+
+    def _add_facade_windows(self, facade, face_name: str) -> None:
+        """在立面上开窗。"""
+        fixed = self._face_fixed(face_name)
+        span_max = self._face_span_max(face_name)
+        axis = self._face_fixed_axis(face_name)
+        for win in facade.windows:
+            wx = int(win.x * span_max)
+            if wx < 1 or wx >= span_max:
+                continue
+            for dy in range(win.height):
+                wy = win.y_offset + dy
+                if wy >= self.h - 1:
+                    break
+                if axis == "z":
+                    self._set(wx, wy, fixed, MAT_WINDOW)
+                else:
+                    self._set(fixed, wy, wx, MAT_WINDOW)
+
+    def _add_facade_openings(self, facade, face_name: str) -> None:
+        """在立面上开门洞/拱门。"""
+        fixed = self._face_fixed(face_name)
+        span_max = self._face_span_max(face_name)
+        axis = self._face_fixed_axis(face_name)
+        for opening in facade.openings:
+            ox = int(opening.x * span_max)
+            ow = max(1, int(opening.width * span_max))
+            ox1 = max(0, ox - ow // 2)
+            ox2 = min(span_max, ox + ow // 2)
+            for oy in range(opening.height):
+                if oy >= self.h:
+                    break
+                for oxx in range(ox1, ox2 + 1):
+                    if axis == "z":
+                        self._set(oxx, oy, fixed, MAT_AIR)
+                    else:
+                        self._set(fixed, oy, oxx, MAT_AIR)
+            # 拱门样式
+            if opening.style == "arch":
+                r = ow // 2
+                for dx in range(-r, r + 1):
+                    dy = int(math.sqrt(max(0, r * r - dx * dx)))
+                    ay = opening.height - dy
+                    ax = ox + dx
+                    if axis == "z":
+                        self._set(ax, ay, fixed, self.mat_accent)
+                    else:
+                        self._set(fixed, ay, ax, self.mat_accent)
+
+    def _add_facade_railings(self, facade, face_name: str) -> None:
+        """在立面上加栏杆。"""
+        fixed = self._face_fixed(face_name)
+        span_max = self._face_span_max(face_name)
+        axis = self._face_fixed_axis(face_name)
+        rail_y = self.h // 2
+        step = max(2, span_max // 6)
+        for i in range(0, span_max + 1, step):
+            if axis == "z":
+                self._set(i, rail_y, fixed, self.mat_accent)
+                self._set(i, rail_y + 1, fixed, self.mat_trim)
+            else:
+                self._set(fixed, rail_y, i, self.mat_accent)
+                self._set(fixed, rail_y + 1, i, self.mat_trim)
 
     # ── 墙壁 ──
 
@@ -493,6 +674,12 @@ class BlockBuilder:
             self._add_pyramid_roof()
         elif rt == "dome":
             self._add_dome_roof()
+        elif rt == "xieshan":
+            self._add_xieshan_roof()
+        elif rt == "curved":
+            self._add_curved_roof()
+        elif rt == "eaved":
+            self._add_eaved_roof()
         else:
             self._add_flat_roof()
 
@@ -570,6 +757,70 @@ class BlockBuilder:
         if ty < self.h:
             self._set(tx, ty, tz, self.mat_accent)
 
+    def _add_xieshan_roof(self) -> None:
+        """歇山顶：山花 + 四坡结合的混合式屋顶。"""
+        half = self.l // 2
+        hip_depth = self.l // 4
+        for z in range(self.l):
+            dist = abs(z - half)
+            if dist <= hip_depth:
+                rise = self.w // 4
+                level = int(rise * (1 - dist / hip_depth))
+                for x in range(level, self.w - level):
+                    self._set(x, self.h - 1, z, self.mat_roof)
+                for x in range(level):
+                    rel_x = x
+                    for dz in range(-1, 2):
+                        if 0 <= z + dz < self.l:
+                            self._set(rel_x, self.h - 1, z + dz, self.mat_roof)
+                            self._set(self.w - 1 - rel_x, self.h - 1, z + dz, self.mat_roof)
+            else:
+                ridge = max(1, self.w - 2 * (dist - hip_depth))
+                x1 = (self.w - ridge) // 2
+                for x in range(x1, x1 + ridge):
+                    self._set(x, self.h - 1, z, self.mat_roof)
+        # 正脊（顶部中脊线）
+        ridge_y = self.h - 1
+        for x in range(1, self.w - 1):
+            self._set(x, ridge_y, half, self.mat_accent)
+
+    def _add_curved_roof(self) -> None:
+        """卷棚顶式曲面屋顶：类似中式弧线屋顶。"""
+        half = self.l // 2
+        curve = max(1, self.l // 6)
+        for z in range(self.l):
+            dist = abs(z - half)
+            offset = int(curve * math.sin(math.pi * dist / half)) if half > 0 else 0
+            shrink = int(dist * 0.3)
+            x1 = shrink
+            x2 = self.w - 1 - shrink
+            for x in range(x1, x2 + 1):
+                ty = self.h - 1 + offset
+                if ty < self.h:
+                    self._set(x, ty, z, self.mat_roof)
+
+    def _add_eaved_roof(self) -> None:
+        """重檐风格：多层屋檐出挑。"""
+        tiers = self.desc.roof_tiers or 2
+        for tier in range(tiers):
+            y = self.h - 1 - tier * (self.h // (tiers + 1))
+            if y < self.h // 3:
+                break
+            overhang = tier + 1
+            x1 = max(0, overhang)
+            z1 = max(0, overhang)
+            x2 = self.w - 1 - overhang
+            z2 = self.l - 1 - overhang
+            if x1 > x2 or z1 > z2:
+                break
+            self._fill(x1, y, z1, x2, y, z2, self.mat_roof)
+            for x in range(x1, x2 + 1):
+                self._set(x, y, z1, self.mat_accent)
+                self._set(x, y, z2, self.mat_accent)
+            for z in range(z1, z2 + 1):
+                self._set(x1, y, z, self.mat_accent)
+                self._set(x2, y, z, self.mat_accent)
+
     # ── 支撑柱 ──
 
     def _add_support_columns(self) -> None:
@@ -579,6 +830,59 @@ class BlockBuilder:
         for y in range(1, self.h - 2):
             for dx, dz in [(0, 0), (1, 0), (0, 1), (1, 1)]:
                 self._set(cx + dx, y, cz + dz, self.mat_pillar)
+
+    # ── 内部结构 ──
+
+    def _build_interior(self) -> None:
+        """根据 AI 特征创建内部结构（楼梯、隔墙、家具）。"""
+        has_stairs = any(f.feature_type == "stairs" for f in self.desc.features)
+        if has_stairs:
+            self._add_stairs()
+
+        has_rooms = any(f.feature_type == "room" for f in self.desc.features)
+        if has_rooms:
+            self._add_room_partitions()
+
+        has_furniture = any(f.feature_type == "furniture" for f in self.desc.features)
+        if has_furniture:
+            self._add_furniture()
+
+    def _add_stairs(self) -> None:
+        """在建筑内部一侧添加楼梯。"""
+        if self.floors <= 1 or self.h < 6 or self.w < 4:
+            return
+        stair_x = max(1, self.w - 3)
+        stair_z = 1
+        for floor in range(self.floors - 1):
+            y_base = 1 + floor * (self.h // self.floors)
+            for step in range(min(4, self.h // self.floors - 1)):
+                for dx in range(2):
+                    for dz in range(step + 1):
+                        z = stair_z + dz
+                        if z < self.l - 1:
+                            self._set(stair_x + dx, y_base + step, z, self.mat_floor)
+
+    def _add_room_partitions(self) -> None:
+        """在建筑内添加隔墙（中心十字墙）。"""
+        if self.w < 5 or self.l < 5 or self.h < 3:
+            return
+        cx, cz = self.w // 2, self.l // 2
+        for y in range(1, self.h - 2):
+            for x in range(self.w):
+                if abs(x - cx) <= 0:
+                    self._set(x, y, cz, self.mat_wall)
+            for z in range(self.l):
+                if abs(z - cz) <= 0:
+                    self._set(cx, y, z, self.mat_wall)
+
+    def _add_furniture(self) -> None:
+        """在建筑内添加简单家具（桌子、椅子、书架）。"""
+        cx, cz = self.w // 2, self.l // 2
+        table_y = 1
+        for dx in range(2):
+            for dz in range(2):
+                self._set(cx + dx, table_y, cz + dz, self.mat_floor)
+        self._set(cx, table_y + 1, cz, self.mat_accent)
 
     # ── 装饰特征 ──
 
