@@ -505,6 +505,8 @@ class BlockBuilder:
                 if facade.railings:
                     self._add_facade_railings(facade, face_name)
         self._add_roof()
+        # 逐面生成也应有内部结构（楼梯/隔墙/家具），与 _build_generic 行为一致
+        self._build_interior()
         self._apply_features_decorations()
 
     def _face_fixed(self, face_name: str) -> int:

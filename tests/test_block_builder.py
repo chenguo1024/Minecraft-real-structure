@@ -404,6 +404,56 @@ class TestFacades:
         # 拱门底部应为空气
         assert s.blocks[idx(5, 1, 0)] == air_idx, "拱门底部应为空气"
 
+    def test_facade_railings_placed(self):
+        """立面上栏杆被放置（覆盖 _add_facade_railings 未测分支）。"""
+        desc = self._facade_desc(
+            facades=[Facade(face="front", material="stone_bricks", railings=True)],
+        )
+        builder = BlockBuilder(desc)
+        s = builder.build()
+        andesite_idx = s.palette.index("minecraft:polished_andesite")
+        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
+        # rail_y = h//2 = 5, step = max(2, 11//6) = 2, 栏杆柱在 (2, 5, 0)
+        rail = s.blocks[idx(2, 5, 0)]
+        assert rail == andesite_idx, f"正面栏杆应为 polished_andesite，实际 {s.palette[rail]}"
+
+    def test_facade_path_generates_interior(self):
+        """facade 路径也应生成内部结构（家具椅腿证明 _build_interior 被调用）。"""
+        desc = self._facade_desc(
+            height=10, width=12, length=12,
+            features=[
+                BuildingFeature(feature_type="roof", position="flat"),
+                BuildingFeature(feature_type="furniture"),
+            ],
+        )
+        builder = BlockBuilder(desc)
+        s = builder.build()
+        andesite_idx = s.palette.index("minecraft:polished_andesite")
+        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
+        # _add_furniture 在中心 (cx, table_y+1, cz) = (6, 2, 6) 放椅腿 polished_andesite
+        leg = s.blocks[idx(6, 2, 6)]
+        assert leg == andesite_idx, (
+            f"facade 路径中心应有家具椅腿 polished_andesite，实际 {s.palette[leg]}"
+        )
+
+    def test_facade_path_generates_stairs(self):
+        """facade 路径 + stairs 特征时楼板上方应有楼梯方块。"""
+        desc = self._facade_desc(
+            height=12, width=10, length=12,
+            features=[
+                BuildingFeature(feature_type="roof", position="flat"),
+                BuildingFeature(feature_type="stairs"),
+            ],
+        )
+        builder = BlockBuilder(desc)
+        s = builder.build()
+        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
+        air_idx = s.palette.index("minecraft:air")
+        # _add_stairs 在 stair_x=w-3=7, stair_z=1, y_base=1, step≥1 内放 mat_floor
+        # 该位置在建筑内部，若无楼梯应为空气；有楼梯则为非空气
+        got = s.blocks[idx(7, 2, 1)]
+        assert got != air_idx, "facade 路径内部应有楼梯方块，实际为空气"
+
 
 class TestCurvesAndCircles:
     """测试曲线/圆形辅助方法。"""
@@ -468,7 +518,10 @@ class TestInterior:
                           ])
         builder = BlockBuilder(desc)
         s = builder.build()
-        assert len(s.blocks) > 0
+        # _add_stairs: stair_x=w-3=5, stair_z=1, y_base=1, step=1 → (5,2,1) 应为 oak_planks
+        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
+        oak_idx = s.palette.index("minecraft:oak_planks")
+        assert s.blocks[idx(5, 2, 1)] == oak_idx, "内部应有楼梯方块（oak_planks）"
 
     def test_room_partitions_generated(self):
         desc = _make_desc(height=10, width=12, length=12,
@@ -478,7 +531,11 @@ class TestInterior:
                           ])
         builder = BlockBuilder(desc)
         s = builder.build()
-        assert len(s.blocks) > 0
+        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
+        stone_idx = s.palette.index("minecraft:stone_bricks")
+        # _add_room_partitions 在中心 (cx=6, y, cz=6) 设 mat_wall=stone_bricks，
+        # 覆盖 support_columns 的 chiseled_stone_bricks → 出现 stone_bricks 即证明隔墙生效
+        assert s.blocks[idx(6, 3, 6)] == stone_idx, "中心应有隔墙（stone_bricks）"
 
     def test_furniture_generated(self):
         desc = _make_desc(height=8, width=8, length=8,
@@ -488,7 +545,10 @@ class TestInterior:
                           ])
         builder = BlockBuilder(desc)
         s = builder.build()
-        assert len(s.blocks) > 0
+        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
+        andesite_idx = s.palette.index("minecraft:polished_andesite")
+        # _add_furniture 椅腿 (cx=4, table_y+1=2, cz=4) = polished_andesite
+        assert s.blocks[idx(4, 2, 4)] == andesite_idx, "中心应有家具椅腿（polished_andesite）"
 
     def test_interior_all_features(self):
         desc = _make_desc(height=12, width=10, length=12,
@@ -500,7 +560,10 @@ class TestInterior:
                           ])
         builder = BlockBuilder(desc)
         s = builder.build()
-        assert len(s.blocks) > 0
+        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
+        andesite_idx = s.palette.index("minecraft:polished_andesite")
+        # 家具椅腿在 (cx=5, 2, cz=6) = polished_andesite（联调三种 interior 仍生效）
+        assert s.blocks[idx(5, 2, 6)] == andesite_idx, "三件套联调时家具椅腿仍应为 polished_andesite"
 
 
 class TestWikipediaDepth:

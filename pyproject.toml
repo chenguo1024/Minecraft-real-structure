@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "minecraft-real-structure"
-version = "1.0.1"
+version = "1.1.2"
 description = "AI 驱动的工具，将现实建筑照片转换成 Minecraft 三维结构"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -48,3 +48,17 @@ mc-structure = "src.main:cli"
 
 [tool.setuptools.packages.find]
 include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+    "-p", "no:cacheprovider",
+    "-q",
+]
+# 本机 py -3 = Python 3.14 + pytest 9.1.1。
+# no:cacheprovider 规避 Windows .pytest_cache WinError 183（不同 pytest 版本混用残留）。
+# 若仍报 Temp 权限拒绝（pytest-of-<user> 无法扫描），可在命令行加：
+#   --basetemp=C:\Users\<用户名>\AppData\Local\Temp\opencode\pytest
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]

@@ -1,4 +1,4 @@
-# Minecraft Real Structure v1.0.1
+# Minecraft Real Structure v1.1.2
 
 > AI 驱动的工具，将现实世界建筑照片转换成 Minecraft 三维结构（.nbt 文件）。
 > 
@@ -20,7 +20,7 @@
 | 方块生成 | Python + 颜色分组 BlockMap | 根据描述生成三维方块数组 |
 | NBT 导出 | 手写 NBT 二进制 (GZip) | 写入 Minecraft 结构文件 |
 | Web | FastAPI + Uvicorn + Jinja2 | HTTP 上传界面 |
-| 测试 | pytest (90 个测试) | 全链路测试覆盖 |
+| 测试 | pytest (115 个测试) | 全链路测试覆盖 |
 
 ## 项目结构
 
@@ -76,7 +76,7 @@ Start-Process powershell "-NoExit & 'C:\Users\你的用户名\AppData\Local\Prog
 Start-Sleep 3; Start-Process http://127.0.0.1:8000
 
 # 或在游戏目录直接生成
-python -m src.main mock --image photo.jpg --version java-1.20
+py -3 -m src.main mock --image photo.jpg --version java-1.20
 ```
 
 ## 核心功能
@@ -103,7 +103,7 @@ python -m src.main mock --image photo.jpg --version java-1.20
 
 ```bash
 # 运行测试
-pytest tests/ -v
+py -3 -m pytest tests/ -v
 
 # 添加新方块映射
 # 编辑 src/generator/block_map.py 中的 _PALETTE 字典
@@ -114,11 +114,11 @@ pytest tests/ -v
 
 ## 已知限制
 
-- 生成器仍基于模板，AI 输出的细节（开间数、屋顶层数）利用有限
-- 所有建筑是 axis-aligned 的方盒子，不支持曲线/圆形
-- 只有外壳，没有内部结构（房间/楼梯/家具）
-- 无法 3D 预览
-- 没有进度反馈
+- 圆形/弧线仅用阶梯状方块近似，非真正平滑曲面
+- 内部布局（房间/楼梯/家具）仍较简单，依赖 AI 的 `floors` 等参数
+- AI 输出细节（开间数、屋顶层数等）利用仍有限
+- 暂不支持 Bedrock 版 `.mcstructure` 导出
+- 无 CI / lint 自动化
 
 详见 [GitHub Issues](https://github.com/chenguo1024/Minecraft-real-structure/issues)。
 
@@ -134,14 +134,14 @@ pytest tests/ -v
 - [x] FastAPI Web 界面
 - [x] 多版本方块映射与自动 fallback
 - [x] 多开间/台基/重檐大门生成器
-- [ ] 逐面生成（按 AI 对每个面的描述放置方块）
-- [ ] 曲线/圆形/非正交结构
-- [ ] 多样化屋顶（中式歇山/攒尖等）
-- [ ] 内部结构（房间/楼梯/家具）
-- [ ] Wikipedia 深度利用（开间/进深解析）
-- [ ] Web 端 3D 预览
-- [ ] 生成进度反馈（WebSocket）
-- [ ] 结果页手动调整参数
+- [x] 逐面生成（按 AI 对每个面的描述放置方块）
+- [x] 曲线/圆形/非正交结构（阶梯近似）
+- [x] 多样化屋顶（歇山/卷棚/重檐）
+- [x] 内部结构（房间/楼梯/家具）
+- [x] Wikipedia 深度利用（开间/进深解析）
+- [x] Web 端 3D 预览（Three.js InstancedMesh）
+- [x] 生成进度反馈（SSE /progress）
+- [x] 结果页手动调整参数（/regenerate）
 - [ ] Bedrock `.mcstructure` 支持
 
 ## 许可证
