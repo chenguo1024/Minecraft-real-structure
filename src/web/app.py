@@ -27,7 +27,9 @@ app = FastAPI(title="Minecraft Real Structure", version="1.0.1")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # 进度跟踪：task_id → progress dict
+# 描述存储：task_id → BuildingDescription (用于重新生成)
 progress_store: dict[str, dict] = {}
+desc_store: dict[str, BuildingDescription] = {}
 
 
 def set_progress(task_id: str, step: str, pct: int, message: str) -> None:
@@ -57,7 +59,7 @@ async def home():
 @app.post("/analyze")
 async def analyze(
     request: Request,
-    images: UploadFile = File(...),
+    images: list[UploadFile] = File(...),
     version: str = Form("java-1.20"),
     api_key: str | None = Form(None),
 ):
@@ -73,11 +75,12 @@ async def analyze(
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     set_progress(task_id, "upload", 5, "正在保存上传图片...")
 
-    ext = Path(images.filename or "unknown").suffix or ".jpg"
-    img_path = UPLOAD_DIR / f"{file_id}_0{ext}"
-    content = await images.read()
-    img_path.write_bytes(content)
-    image_paths.append(str(img_path))
+    for i, img_file in enumerate(images):
+        ext = Path(img_file.filename or "unknown").suffix or ".jpg"
+        img_path = UPLOAD_DIR / f"{file_id}_{i}{ext}"
+        content = await img_file.read()
+        img_path.write_bytes(content)
+        image_paths.append(str(img_path))
 
     try:
         set_progress(task_id, "analyze", 20, "AI 分析建筑照片...")
@@ -132,6 +135,9 @@ async def analyze(
 
     set_progress(task_id, "done", 100, "生成完成")
 
+    # 存储描述用于后续重新生成
+    desc_store[task_id] = desc
+
     return _render(
         "result.html",
         desc=desc,
@@ -162,12 +168,18 @@ async def regenerate(
 ):
     """根据调整后的参数重新生成。"""
     try:
-        # Re-use the original images from the task
+        # 尝试复用原始 AI 分析结果
+        original_desc = desc_store.get(task_id)
+
         from src.analysis.mock_analyzer import analyze as mock_analyze
 
-        # Create minimal building description with user parameters
-        desc = mock_analyze("dummy.jpg", MinecraftVersion.JAVA_1_20)
+        if original_desc:
+            desc = original_desc.model_copy(deep=True)
+        else:
+            desc = mock_analyze("dummy.jpg", MinecraftVersion.JAVA_1_20)
+
         desc.height = max(1, min(height, 128))
+        desc.width = max(1, min(width, 128))
         desc.width = max(1, min(width, 128))
         desc.length = max(1, min(length, 128))
         desc.floors = max(1, floors)
