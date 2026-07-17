@@ -85,7 +85,7 @@ class TestBuildingDescription:
         with pytest.raises(ValidationError):
             BuildingDescription(building_type="x", height=0, width=1, length=1)
         with pytest.raises(ValidationError):
-            BuildingDescription(building_type="x", height=257, width=1, length=1)
+            BuildingDescription(building_type="x", height=1025, width=1, length=1)
 
     def test_full_description(self):
         desc = BuildingDescription(

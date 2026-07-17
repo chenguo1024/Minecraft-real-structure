@@ -9,8 +9,8 @@
 <body>
 <div class="container">
   <header>
-    <h1>Minecraft Real Structure</h1>
-    <p class="subtitle">上传建筑照片，AI 生成 Minecraft 结构文件</p>
+    <h1>Minecraft Real Structure <span class="badge">v2</span></h1>
+    <p class="subtitle">上传建筑照片，AI + Wikipedia 生成精确的 Minecraft 结构</p>
   </header>
 
   <main>
@@ -24,11 +24,10 @@
           </svg>
         </div>
         <p class="upload-text">拖拽图片到这里，或 <span class="link">点击选择</span></p>
-        <p class="upload-hint">支持 JPG / PNG / WebP</p>
-        <input type="file" name="image" id="fileInput" accept="image/*" hidden>
+        <p class="upload-hint">支持多张照片（不同角度），JPG / PNG / WebP</p>
+        <input type="file" name="images" id="fileInput" accept="image/*" multiple hidden>
         <div id="filePreview" class="file-preview hidden">
-          <img id="previewImg" alt="预览">
-          <span id="fileName"></span>
+          <div class="preview-list" id="previewList"></div>
         </div>
       </div>
 
@@ -43,7 +42,7 @@
       </div>
 
       <div class="options">
-        <label for="apiKey">API Key <span class="hint">(选填，不填则用 Mock 数据)</span></label>
+        <label for="apiKey">API Key <span class="hint">(必填走 AI+Wikipedia 增强分析，不填用 Mock)</span></label>
         <input type="password" name="api_key" id="apiKey" placeholder="智谱 GLM-4V-Flash API Key">
       </div>
 
@@ -57,7 +56,7 @@
   </main>
 
   <footer>
-    <p>开源项目 · <a href="https://github.com/your-username/minecraft-real-structure" target="_blank">GitHub</a></p>
+    <p>开源项目 · <a href="https://github.com/chenguo1024/Minecraft-real-structure" target="_blank">GitHub</a></p>
   </footer>
 </div>
 
@@ -65,17 +64,16 @@
 const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
 const preview = document.getElementById('filePreview');
-const previewImg = document.getElementById('previewImg');
-const fileName = document.getElementById('fileName');
+const previewList = document.getElementById('previewList');
 const submitBtn = document.getElementById('submitBtn');
 const form = document.getElementById('uploadForm');
 const btnText = document.querySelector('.btn-text');
 const btnLoading = document.querySelector('.btn-loading');
 
-// 点击上传区域触发文件选择
+let selectedFiles = [];
+
 dropZone.addEventListener('click', () => fileInput.click());
 
-// 拖拽上传
 dropZone.addEventListener('dragover', (e) => {
   e.preventDefault();
   dropZone.classList.add('dragover');
@@ -87,30 +85,39 @@ dropZone.addEventListener('drop', (e) => {
   e.preventDefault();
   dropZone.classList.remove('dragover');
   if (e.dataTransfer.files.length) {
+    selectedFiles = Array.from(e.dataTransfer.files);
     fileInput.files = e.dataTransfer.files;
-    showPreview(e.dataTransfer.files[0]);
+    showPreviews(selectedFiles);
   }
 });
 
-// 选择文件
 fileInput.addEventListener('change', () => {
   if (fileInput.files.length) {
-    showPreview(fileInput.files[0]);
+    selectedFiles = Array.from(fileInput.files);
+    showPreviews(selectedFiles);
   }
 });
 
-function showPreview(file) {
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    previewImg.src = e.target.result;
-    fileName.textContent = file.name;
-    preview.classList.remove('hidden');
-    submitBtn.disabled = false;
-  };
-  reader.readAsDataURL(file);
+function showPreviews(files) {
+  previewList.innerHTML = '';
+  let loaded = 0;
+  files.forEach((file, i) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const item = document.createElement('div');
+      item.className = 'preview-item';
+      item.innerHTML = `<img src="${e.target.result}" alt="${file.name}"><span>${i+1}. ${file.name}</span>`;
+      previewList.appendChild(item);
+      loaded++;
+      if (loaded === files.length) {
+        preview.classList.remove('hidden');
+        submitBtn.disabled = false;
+      }
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
-// 提交时显示加载状态
 form.addEventListener('submit', () => {
   submitBtn.disabled = true;
   btnText.classList.add('hidden');

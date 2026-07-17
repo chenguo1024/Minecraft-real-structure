@@ -15,6 +15,7 @@ _MODERN_VILLA = BuildingDescription(
     height=10, width=8, length=12,
     shape="rectangle",
     style="modern",
+    floors=2,
     materials=[
         BlockMaterial(name="stone_bricks", color="light_gray", fraction=0.6),
         BlockMaterial(name="oak_planks", color="brown", fraction=0.25),
@@ -34,6 +35,7 @@ _L_SHAPE_VILLA = BuildingDescription(
     height=10, width=10, length=12,
     shape="L",
     style="modern",
+    floors=2,
     materials=[
         BlockMaterial(name="stone_bricks", color="light_gray", fraction=0.5),
         BlockMaterial(name="glass", color="light_blue", fraction=0.2),
@@ -52,6 +54,7 @@ _GOTHIC_CHURCH = BuildingDescription(
     height=18, width=10, length=20,
     shape="cross",
     style="gothic",
+    floors=1,
     materials=[
         BlockMaterial(name="stone_bricks", color="light_gray", fraction=0.7),
         BlockMaterial(name="polished_andesite", color="gray", fraction=0.2),
@@ -71,6 +74,7 @@ _ASIAN_PAGODA = BuildingDescription(
     height=14, width=8, length=8,
     shape="rectangle",
     style="asian",
+    floors=5,
     materials=[
         BlockMaterial(name="bricks", color="red", fraction=0.5),
         BlockMaterial(name="oak_planks", color="brown", fraction=0.3),
@@ -89,6 +93,7 @@ _CLASSICAL_MANSION = BuildingDescription(
     height=12, width=12, length=14,
     shape="rectangle",
     style="classical",
+    floors=3,
     materials=[
         BlockMaterial(name="stone_bricks", color="light_gray", fraction=0.6),
         BlockMaterial(name="polished_andesite", color="gray", fraction=0.3),

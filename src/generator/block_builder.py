@@ -90,7 +90,7 @@ class BlockStructure:
         self.size_z = size_z
 
 
-MAX_RECOMMENDED = 48  # Minecraft 结构块最大推荐尺寸
+MAX_RECOMMENDED = 128  # 结构方块加载上限 48，但 /place template 命令无限制
 
 
 class BlockBuilder:
@@ -100,10 +100,11 @@ class BlockBuilder:
         self.desc = description
         self.block_map = BlockMap(description.minecraft_version)
 
-        # 基本尺寸
-        self.w = description.width
-        self.h = description.height
-        self.l = description.length
+        # 精细度缩放
+        scale = max(1, description.detail_scale)
+        self.w = description.width * scale
+        self.h = description.height * scale
+        self.l = description.length * scale
 
         # 尺寸警告
         oversized = [dim for dim, val in
@@ -111,9 +112,9 @@ class BlockBuilder:
                      if val > MAX_RECOMMENDED]
         if oversized:
             warnings.warn(
-                f"尺寸超出 Minecraft 结构块推荐上限 ({MAX_RECOMMENDED}): "
-                f"{', '.join(oversized)}。生成的 .nbt 文件可用 /place 指令加载，"
-                f"但结构块 GUI 最多保存 {MAX_RECOMMENDED}×{MAX_RECOMMENDED}×{MAX_RECOMMENDED}。"
+                f"尺寸大于结构方块推荐上限 ({MAX_RECOMMENDED}): "
+                f"{', '.join(oversized)}。"
+                f"可用 /place template 命令放置更大结构。"
             )
         self.shape = description.shape
         self.floors = max(1, self.h // 4)

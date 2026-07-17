@@ -47,12 +47,13 @@ class BuildingDescription(BaseModel):
         default=MinecraftVersion.JAVA_1_20,
         description="目标 Minecraft 版本，决定方块 ID 映射和导出格式",
     )
-    building_type: str = Field(description="建筑类型，如 house, tower, church, bridge")
-    height: int = Field(ge=1, le=256, description="建筑高度（方块数）。为 Minecraft 结构方块兼容性推荐 ≤48，大于 48 时生成器会给出警告。")
-    width: int = Field(ge=1, le=256, description="建筑宽度（方块数）。推荐 ≤48。")
-    length: int = Field(ge=1, le=256, description="建筑深度（方块数）。推荐 ≤48。")
+    building_type: str = Field(description="建筑类型，如 house, tower, church, bridge, gate")
+    building_name: str = Field(default="", description="建筑名称，如 中科大西大门, 故宫太和殿")
+    height: int = Field(ge=1, le=1024, description="建筑高度（方块数）。使用 /place template 命令可放置任意大小。")
+    width: int = Field(ge=1, le=1024, description="建筑宽度（方块数）。")
+    length: int = Field(ge=1, le=1024, description="建筑深度（方块数）。")
     shape: str = Field(default="rectangle", description="建筑平面形状，如 rectangle, L, cross, T, U")
-    style: str = Field(default="modern", description="建筑风格，如 modern, gothic, classical, asian")
+    style: str = Field(default="modern", description="建筑风格，如 modern, gothic, classical, asian, chinese")
     materials: list[BlockMaterial] = Field(
         default_factory=list,
         description="主要建筑材料列表",
@@ -61,4 +62,6 @@ class BuildingDescription(BaseModel):
         default_factory=list,
         description="建筑特征列表",
     )
+    floors: int = Field(default=1, ge=1, le=100, description="楼层数")
+    detail_scale: int = Field(default=1, ge=1, le=8, description="精细度缩放倍率。1=每米1格(标准), 2=每米2格(精细), 3=每米3格(极精细)")
     description: str = Field(default="", description="AI 生成的额外文字描述")

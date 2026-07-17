@@ -8,3 +8,6 @@ data/
 
 # Secrets
 .env
+
+# Root test file
+test.nbt
