@@ -1,23 +1,26 @@
-# Minecraft Real Structure
+# Minecraft Real Structure v1.0.1
 
-> AI 驱动的工具，将现实世界建筑照片转换成 Minecraft 三维结构。
+> AI 驱动的工具，将现实世界建筑照片转换成 Minecraft 三维结构（.nbt 文件）。
+> 
+> 使用智谱 GLM-4V-Flash（永久免费）分析建筑图片，自动查 Wikipedia 校准尺寸，生成 Minecraft 可识别的结构文件。
 
 ## 工作流程
 
 ```
-用户上传照片 → AI 视觉模型分析 → 结构化 JSON → 方块生成器 → Minecraft 结构文件 (.nbt)
+用户上传照片 → AI 视觉分析 → Wikipedia 查证 → 结构化 JSON → 方块生成器 → NBT 导出 → /place template 放置
 ```
 
 ## 技术栈
 
 | 层 | 选型 | 用途 |
 |---|---|---|
-| 数据模型 | Pydantic | 分析/生成/导出三层的共享数据契约 |
-| AI 分析 | OpenAI Vision API / Gemini Vision | 从图片提取建筑结构化描述 |
-| 方块生成 | Python + 方块映射表 | 根据描述生成三维方块数组 |
-| NBT 导出 | nbtlib | 写入 Minecraft 结构文件 |
-| CLI | Click | 命令行入口 |
-| Web (可选) | FastAPI + Uvicorn | HTTP 上传接口 |
+| 数据模型 | Pydantic v2 | 分析/生成/导出三层的共享数据契约 |
+| AI 分析 | 智谱 GLM-4V-Flash (httpx 直连) | 从图片提取建筑结构化描述 |
+| 数据查证 | Wikipedia API | 获取真实尺寸/风格/材料 |
+| 方块生成 | Python + 颜色分组 BlockMap | 根据描述生成三维方块数组 |
+| NBT 导出 | 手写 NBT 二进制 (GZip) | 写入 Minecraft 结构文件 |
+| Web | FastAPI + Uvicorn + Jinja2 | HTTP 上传界面 |
+| 测试 | pytest (90 个测试) | 全链路测试覆盖 |
 
 ## 项目结构
 
@@ -25,111 +28,121 @@
 minecraft-real-structure/
 ├── README.md
 ├── pyproject.toml
-├── requirements.txt
-├── .gitignore
 ├── src/
-│   ├── main.py              # CLI 入口
-│   ├── models/
-│   │   └── building.py      # Pydantic 数据模型（数据契约）
 │   ├── analysis/
-│   │   ├── ai_analyzer.py   # AI 视觉分析
-│   │   └── mock_analyzer.py # 测试用 mock 分析器
+│   │   ├── ai_analyzer.py       # GLM-4V-Flash API 调用 + 值归一化
+│   │   ├── enhanced_analyzer.py # 多角度融合 + Wikipedia 增强
+│   │   └── mock_analyzer.py     # 测试用 mock 分析器
 │   ├── generator/
-│   │   ├── block_builder.py # 方块生成引擎
-│   │   └── block_map.py     # 方块 ID 映射表（按版本）
+│   │   ├── block_builder.py     # 方块生成引擎（gate/tower/pagoda/bridge/generic）
+│   │   └── block_map.py         # 方块 ID 映射表（多版本+颜色材料别名）
 │   ├── exporter/
-│   │   └── nbt_exporter.py  # NBT 结构文件导出
-│   └── utils/
-│       └── image_utils.py   # 图片预处理
+│   │   └── nbt_exporter.py      # 手写 NBT 二进制格式（跳过空气方块）
+│   ├── models/
+│   │   └── building.py          # Pydantic 数据模型（数据契约）
+│   ├── utils/
+│   │   └── wikipedia.py         # Wikipedia 建筑信息查询
+│   └── web/
+│       ├── app.py               # FastAPI 应用
+│       ├── templates/           # Jinja2 模板
+│       └── static/              # CSS 样式
 ├── tests/
-└── data/structures/          # 生成的结构文件输出
+│   ├── test_block_builder.py
+│   ├── test_block_map.py
+│   ├── test_integration.py
+│   ├── test_mock_analyzer.py
+│   ├── test_models.py
+│   └── test_nbt_exporter.py
+├── data/
+│   ├── uploads/                 # 用户上传的图片
+│   └── structures/              # 生成的 .nbt 文件
+└── docs/
+    └── issues-v4.md             # v4 待实现功能
 ```
-
----
-
-## Minecraft 版本兼容性
-
-本工具设计为**一份代码多版本兼容**，通过 `--minecraft-version` 参数指定目标版本。
-
-### 支持的版本列表
-
-| 版本标识 | Minecraft 版本 | 方块 ID 格式 | 导出格式 | 说明 |
-|---|---|---|---|---|
-| `java-1.12` | Java Edition 1.12.2 | 数字 ID (如 `1`=`stone`) | NBT `.nbt` | 旧版，数字 ID 已被 Mojang 废弃 |
-| `java-1.13` | Java Edition 1.13–1.16 | 命名空间 ID (如 `minecraft:stone`) | NBT `.nbt` | **扁平化更新**，所有方块改为文本 ID |
-| `java-1.17` | Java Edition 1.17–1.19 | 命名空间 ID | NBT `.nbt` | 新增深板岩层、铜块、蜡烛等方块 |
-| `java-1.20` | Java Edition 1.20+ | 命名空间 ID | NBT `.nbt` | 新增樱花木、雕纹陶罐等 |
-| `bedrock-1.20` | Bedrock Edition 1.20+ | 命名空间 ID | `.mcstructure` | **格式不同**，待开发 |
-
-### 版本间的主要差异
-
-#### 1. 方块 ID
-
-```python
-# 同一方块在不同版本的 ID（以石头为例）
-JAVA_1_12:   "1"            # 数字 ID
-JAVA_1_13+:  "minecraft:stone"  # 命名空间 ID
-```
-
-#### 2. 新增方块（低版本中不存在）
-
-| 方块 | 加入版本 | 替换方案（低版本） |
-|---|---|---|
-| 深板岩 | 1.17 | → 圆石 |
-| 铜块 | 1.17 | → 石砖 |
-| 樱花木 | 1.20 | → 橡木 |
-| 紫水晶 | 1.17 | → 品红色玻璃 |
-|  Sculk  | 1.19 | → 黑色羊毛 |
-
-#### 3. NBT 结构差异
-
-Java 版 `1.12` 和 `1.13+` 的结构块 NBT 格式在根标签名称和数据版本字段上不同。导出器自动识别版本并写入对应的格式。
-
-#### 4. Bedrock 版
-
-基岩版使用 `.mcstructure` 格式（完全不同于 NBT二进制），计划在后续版本中支持。
-
-### 生成时的版本选择策略
-
-1. **用户通过参数指定** `--minecraft-version java-1.20`（默认）
-2. generator 从 `block_map.py` 中读取对应版本的方块 ID 映射
-3. exporter 根据版本写入正确的 NBT 数据版本和格式
-4. 如果指定版本中缺少某些方块，自动 fallback 到最接近的替代方块
-
----
 
 ## 快速开始
 
-```bash
+```powershell
 # 克隆仓库
-git clone https://github.com/your-username/minecraft-real-structure.git
+git clone git@github.com:chenguo1024/Minecraft-real-structure.git
 cd minecraft-real-structure
 
-# 安装依赖（推荐使用 venv）
-python -m venv venv
-venv\Scripts\activate    # Windows
-# source venv/bin/activate  # macOS/Linux
-
+# 安装依赖
 pip install -r requirements.txt
 
-# 运行 CLI（使用 mock 模式，无需 AI 密钥）
-python -m src.main mock --image photo.jpg --version java-1.20
+# 启动 Web 界面（自动打开浏览器）
+$env:ZHIPU_API_KEY="你的智谱API Key"
+Start-Process powershell "-NoExit & 'C:\Users\你的用户名\AppData\Local\Programs\Python\Python314\python.exe' -m uvicorn src.web.app:app --host 0.0.0.0 --port 8000"
+Start-Sleep 3; Start-Process http://127.0.0.1:8000
 
-# 运行 CLI（使用 OpenAI）
-python -m src.main analyze --image photo.jpg --api-key sk-xxx
+# 或在游戏目录直接生成
+python -m src.main mock --image photo.jpg --version java-1.20
 ```
+
+## 核心功能
+
+- **AI 视觉分析**：上传照片，GLM-4V-Flash 识别建筑类型、尺寸、材料、风格
+- **Wikipedia 查证**：识别到建筑名称后自动查 Wikipedia 获取真实尺寸校准
+- **多角度融合**：支持上传多张角度照片，分析后合并结果
+- **按颜色选材料**：AI 根据图片实际颜色选择最匹配的 Minecraft 方块
+- **多开间大门生成**：支持 bays（开间数）、platform_height（台基）、roof_tiers（重檐数）
+- **多建筑类型**：gate（大门）、tower（塔楼）、pagoda（塔）、bridge（桥）、arch（拱门）、generic（通用）
+- **结构方块 / /place template 双支持**：≤48 格可用结构方块，≤128 格用 `/place template`
+- **多版本兼容**：Java 1.12 ~ 1.20，自动方块 ID 映射与 fallback
+
+## Minecraft 放置命令
+
+```minecraft
+# 游戏内按 T 输入（文件名去掉 .nbt）
+/place template minecraft:文件名
+```
+
+如果结构 >48×48×48，请使用 `/place template` 命令，结构方块无法放置。
+
+## 开发
+
+```bash
+# 运行测试
+pytest tests/ -v
+
+# 添加新方块映射
+# 编辑 src/generator/block_map.py 中的 _PALETTE 字典
+
+# 添加新建筑类型
+# 在 block_builder.py 中添加 _build_xxx 方法，在 build() 中注册
+```
+
+## 已知限制
+
+- 生成器仍基于模板，AI 输出的细节（开间数、屋顶层数）利用有限
+- 所有建筑是 axis-aligned 的方盒子，不支持曲线/圆形
+- 只有外壳，没有内部结构（房间/楼梯/家具）
+- 无法 3D 预览
+- 没有进度反馈
+
+详见 [GitHub Issues](https://github.com/chenguo1024/Minecraft-real-structure/issues)。
 
 ## 路线图
 
 - [x] 项目结构设计与数据模型
 - [x] CLI 入口 + Mock 分析器
-- [ ] AI 视觉分析集成（OpenAI / Gemini）
-- [ ] 基础方块生成器（矩形建筑）
-- [ ] NBT 结构文件导出
-- [ ] 复杂建筑生成（多层、屋顶、窗户等）
-- [ ] FastAPI Web 界面
+- [x] AI 视觉分析集成（GLM-4V-Flash）
+- [x] Wikipedia 建筑信息查证
+- [x] 多角度照片融合
+- [x] 多建筑类型生成（gate/tower/pagoda/bridge/arch/generic）
+- [x] 颜色分组材料映射
+- [x] FastAPI Web 界面
+- [x] 多版本方块映射与自动 fallback
+- [x] 多开间/台基/重檐大门生成器
+- [ ] 逐面生成（按 AI 对每个面的描述放置方块）
+- [ ] 曲线/圆形/非正交结构
+- [ ] 多样化屋顶（中式歇山/攒尖等）
+- [ ] 内部结构（房间/楼梯/家具）
+- [ ] Wikipedia 深度利用（开间/进深解析）
+- [ ] Web 端 3D 预览
+- [ ] 生成进度反馈（WebSocket）
+- [ ] 结果页手动调整参数
 - [ ] Bedrock `.mcstructure` 支持
-- [ ] 本地 AI 模型（LLaVA）支持
 
 ## 许可证
 
