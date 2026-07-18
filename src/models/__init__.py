@@ -1,4 +1,5 @@
 from .building import (
+    DEFAULT_MATERIALS,
     BuildingDSL,
     BlockMaterial,
     Component,
@@ -14,6 +15,7 @@ from .building import (
 )
 
 __all__ = [
+    "DEFAULT_MATERIALS",
     "BuildingDSL",
     "BlockMaterial",
     "Component",

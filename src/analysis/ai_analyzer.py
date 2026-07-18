@@ -46,6 +46,20 @@ SYSTEM_PROMPT = """你是一名世界级建筑测绘专家、建筑设计师、3
 必须输出：尺寸、比例、结构、位置、曲线、材料、装饰、几何关系。
 
 ==========================================================
+【多视角综合分析指引】——你可能收到多张从不同角度拍摄的照片
+==========================================================
+当你收到多张照片时，请：
+  1. 综合所有视角信息，构建完整的 3D 理解（不只是正面）
+  2. 从正面照片判断宽度、入口、窗户排列
+  3. 从侧面照片判断深度（length）、侧面窗户/装饰
+  4. 从俯视/仰视判断屋顶形状、屋檐、屋顶层次
+  5. 从远景判断整体比例、周边环境参照物
+  6. 各视角看到的尺寸必须交叉验证，互相矛盾时取最合理值
+  7. components 要覆盖所有面（正面看到的前面 + 侧面看到的侧面 + 俯视图看到的高度和屋顶）
+  8. 窗户要标注所在面（front/back/left/right），不同面可能有不同窗户
+  9. 综合所有照片看到的材料，给出最完整的材料清单
+
+==========================================================
 【分析思维框架】——按以下 12 部分思考（思考过程不输出，仅用于推导最终 JSON）
 ==========================================================
 第 1 部分 总体测绘：建筑类型、风格、整体比例 width:length:height、地点、搜索关键词
@@ -302,10 +316,16 @@ def _clamp(val: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, val))
 
 
-def _encode_image(image_path: str, max_dim: int = 256) -> tuple[str, str]:
+def _encode_image(image_path: str, max_dim: int = 512, quality: int = 92) -> tuple[str, str]:
     """将图片压缩后转为 base64 字符串，返回 (base64_data, mime_type)。
 
-    智谱 API 限制 inputs + max_new_tokens <= 16384，大图必须压缩。
+    提升 max_dim 到 512，保留更多建筑细节（门窗、曲线、装饰）。
+    提升 quality 到 92，减少 JPEG 压缩伪影。
+
+    Args:
+        image_path: 图片路径
+        max_dim: 最大边长（默认 512，旧值 256 太模糊）
+        quality: JPEG 质量（默认 92）
     """
     from PIL import Image
     import io
@@ -325,7 +345,7 @@ def _encode_image(image_path: str, max_dim: int = 256) -> tuple[str, str]:
     if mime == "image/png":
         img.save(buf, format="PNG")
     else:
-        img.save(buf, format="JPEG", quality=85)
+        img.save(buf, format="JPEG", quality=quality)
     data = base64.b64encode(buf.getvalue()).decode("utf-8")
     return data, mime
 
@@ -525,7 +545,27 @@ def _get_env_key() -> str | None:
 def _call_zhipu_api(api_key: str, image_data: str, mime: str) -> dict:
     """调用智谱 GLM-4.6V-Flash API，返回 raw JSON dict。
 
-    含 429 限流指数退避重试（最多 3 次）+ 4.6V 失败时 fallback 到 4V-Flash。
+    单张图片版本（兼容旧代码）。
+    """
+    return _call_zhipu_multi_image(api_key, [(image_data, mime)], "分析这张建筑照片，按 schema 输出 JSON。")
+
+
+def _call_zhipu_multi_image(
+    api_key: str,
+    images: list[tuple[str, str]],
+    prompt_text: str = "综合分析这些建筑照片（不同角度的同一栋建筑），按 schema 输出 JSON。",
+) -> dict:
+    """调用智谱 GLM-4.6V-Flash API，支持多张图片综合分析。
+
+    多张图片会在同一次请求中发送给 AI，让它综合所有视角构建完整的 3D 理解。
+
+    Args:
+        api_key: 智谱 API Key
+        images: [(base64_data, mime_type), ...] 列表
+        prompt_text: 用户提示文本
+
+    Returns:
+        raw JSON dict
     """
     import time
     url = f"{ZHIPU_BASE_URL}chat/completions"
@@ -533,27 +573,26 @@ def _call_zhipu_api(api_key: str, image_data: str, mime: str) -> dict:
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
+
+    # 构建多图片 content
+    content = []
+    for img_data, img_mime in images:
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:{img_mime};base64,{img_data}"}
+        })
+    content.append({
+        "type": "text",
+        "text": prompt_text
+    })
+
     payload = {
         "model": ZHIPU_MODEL,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:{mime};base64,{image_data}"
-                        }
-                    },
-                    {
-                        "type": "text",
-                        "text": "分析这张建筑照片，按 schema 输出 JSON。"
-                    }
-                ]
-            }
+            {"role": "user", "content": content}
         ],
-        "max_tokens": 8192,  # GLM-4.6V-Flash 上限 32K，给 8K 留足 BuildingDSL JSON 输出空间
+        "max_tokens": 8192,
         "temperature": 0.1,
     }
 

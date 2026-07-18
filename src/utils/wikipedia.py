@@ -137,24 +137,47 @@ def _extract_infobox_value(html_text: str, field_names: list[str]) -> str | None
     return None
 
 
-def _extract_height_meters(height_str: str) -> int | None:
-    """从高度字符串（如 '330 m (1,080 ft)'）中提取米数。"""
-    m = re.search(r'(\d+[\.\d]*)\s*m', height_str, re.IGNORECASE)
+def _extract_dimension_meters(dim_str: str) -> int | None:
+    """从尺寸字符串（如 '330 m (1,080 ft)' 或 '50m x 30m'）中提取米数。"""
+    # 优先匹配 "xxx m"
+    m = re.search(r'(\d+[\.\d]*)\s*m', dim_str, re.IGNORECASE)
     if m:
         return int(float(m.group(1)))
     # 尝试中文 "米"
-    m = re.search(r'(\d+[\.\d]*)\s*米', height_str)
+    m = re.search(r'(\d+[\.\d]*)\s*米', dim_str)
     if m:
         return int(float(m.group(1)))
+    # 纯数字 fallback
+    m = re.search(r'(\d+)', dim_str)
+    if m:
+        return int(m.group(1))
+    return None
+
+
+def _extract_height_meters(height_str: str) -> int | None:
+    """从高度字符串（如 '330 m (1,080 ft)'）中提取米数。"""
+    return _extract_dimension_meters(height_str)
+
+
+def _extract_int(val_str: str) -> int | None:
+    """从任意字符串中提取第一个整数。"""
+    m = re.search(r'(\d+)', val_str)
+    if m:
+        return int(m.group(1))
+    return None
+
+
+def _extract_float(val_str: str) -> float | None:
+    """从任意字符串中提取第一个浮点数。"""
+    m = re.search(r'(\d+[\.\d]*)', val_str)
+    if m:
+        return float(m.group(1))
     return None
 
 
 def _extract_floor_count(floor_str: str) -> int | None:
     """从楼层数字符串提取整数。"""
-    m = re.search(r'(\d+)', floor_str)
-    if m:
-        return int(m.group(1))
-    return None
+    return _extract_int(floor_str)
 
 
 def lookup_building(name: str) -> dict | None:
@@ -200,17 +223,43 @@ def lookup_building(name: str) -> dict | None:
         if f:
             result["floor_count_int"] = f
 
+    # 提取宽度（米）
+    if "width" in result:
+        w = _extract_dimension_meters(result["width"])
+        if w:
+            result["width_meters"] = w
+
+    # 提取长度/进深（米）
+    if "length" in result:
+        l = _extract_dimension_meters(result["length"])
+        if l:
+            result["length_meters"] = l
+
     # 提取开间数
     if "bays" in result:
-        b = _extract_floor_count(result["bays"])
+        b = _extract_int(result["bays"])
         if b:
             result["bays_int"] = b
 
     # 提取柱子数
     if "columns" in result:
-        c = _extract_floor_count(result["columns"])
+        c = _extract_int(result["columns"])
         if c:
             result["columns_int"] = c
+
+    # 提取建筑面积，反推平面尺寸
+    if "area" in result and ("width_meters" not in result or "length_meters" not in result):
+        area_val = _extract_float(result["area"])
+        if area_val:
+            if "width_meters" not in result and "length_meters" not in result:
+                # 默认正方形布局
+                side = int(area_val ** 0.5)
+                result["width_meters"] = side
+                result["length_meters"] = side
+            elif "width_meters" not in result and "length_meters" in result:
+                result["width_meters"] = max(1, int(area_val / result["length_meters"]))
+            elif "length_meters" not in result and "width_meters" in result:
+                result["length_meters"] = max(1, int(area_val / result["width_meters"]))
 
     # 从摘要中推理开间数（中文描述如 "面阔九间"）
     if summary and "bays_int" not in result:
@@ -240,7 +289,4 @@ def meters_to_blocks(meters: int) -> int:
     return min(blocks, 256)
 
 
-def estimate_width_from_height(height_m: int, aspect_ratio: float = 0.3) -> int:
-    """从高度推算大致宽度（常见建筑的高宽比）。"""
-    w = int(height_m * aspect_ratio)
-    return max(1, min(w, 256))
+

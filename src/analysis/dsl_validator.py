@@ -9,7 +9,7 @@ from __future__ import annotations
 
 
 from src.generator.block_map import BlockMap
-from src.models.building import BuildingDSL
+from src.models.building import DEFAULT_MATERIALS, BuildingDSL
 
 
 # ─── 校验 ───
@@ -157,20 +157,8 @@ def score(dsl: BuildingDSL) -> tuple[int, list[str]]:
         reasons.append(f"materials 仅 {n_mat} 种，至少应有 3 种")
 
     # 全局部位材质是否全部为默认值
-    _default_parts = {
-        "platform_material": "stone_bricks",
-        "roof_material": "stone_bricks",
-        "door_material": "dark_oak_door",
-        "window_glass_material": "glass",
-        "wall_material": "stone_bricks",
-        "pillar_material": "chiseled_stone_bricks",
-        "trim_material": "polished_andesite",
-        "railing_material": "oak_fence",
-        "cornice_material": "polished_andesite",
-        "foundation_material": "smooth_stone",
-    }
     custom_parts = 0
-    for field, default in _default_parts.items():
+    for field, default in DEFAULT_MATERIALS.items():
         val = getattr(dsl, field, "")
         if val and val != default:
             custom_parts += 1
@@ -346,19 +334,7 @@ def fix(dsl: BuildingDSL) -> list[str]:
 
     # 材质回退：检查每个材质字段是否在 BlockMap 中存在
     _bm = BlockMap(dsl.minecraft_version)
-    _material_fields = [
-        ("platform_material", "stone_bricks"),
-        ("roof_material", "stone_bricks"),
-        ("door_material", "dark_oak_door"),
-        ("window_glass_material", "glass"),
-        ("wall_material", "stone_bricks"),
-        ("pillar_material", "chiseled_stone_bricks"),
-        ("trim_material", "polished_andesite"),
-        ("railing_material", "oak_fence"),
-        ("cornice_material", "polished_andesite"),
-        ("foundation_material", "smooth_stone"),
-    ]
-    for field, fallback in _material_fields:
+    for field, fallback in DEFAULT_MATERIALS.items():
         val = getattr(dsl, field, "")
         if val and _bm.get_block_id(val) == _bm.get_block_id("stone_bricks") and val.lower().strip() not in ("stone_bricks", "minecraft:stone_bricks"):
             old = val

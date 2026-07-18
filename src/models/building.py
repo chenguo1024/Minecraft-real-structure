@@ -22,6 +22,38 @@ class MinecraftVersion(str, Enum):
 # ═══════════════════════════════════════════════════════════════
 
 
+# 全局部位材质默认值（BuildingDSL 各部位的 fallback 材质）
+# 供 dsl_validator, enhanced_analyzer 等模块共享引用
+DEFAULT_MATERIALS: dict[str, str] = {
+    "platform_material": "stone_bricks",
+    "roof_material": "stone_bricks",
+    "door_material": "dark_oak_door",
+    "window_glass_material": "glass",
+    "wall_material": "stone_bricks",
+    "pillar_material": "chiseled_stone_bricks",
+    "trim_material": "polished_andesite",
+    "railing_material": "oak_fence",
+    "cornice_material": "polished_andesite",
+    "foundation_material": "smooth_stone",
+}
+
+
+# 全局部位材质默认值（BuildingDSL 各部位的 fallback 材质）
+# 供 dsl_validator, enhanced_analyzer 等模块共享引用
+DEFAULT_MATERIALS: dict[str, str] = {
+    "platform_material": "stone_bricks",
+    "roof_material": "stone_bricks",
+    "door_material": "dark_oak_door",
+    "window_glass_material": "glass",
+    "wall_material": "stone_bricks",
+    "pillar_material": "chiseled_stone_bricks",
+    "trim_material": "polished_andesite",
+    "railing_material": "oak_fence",
+    "cornice_material": "polished_andesite",
+    "foundation_material": "smooth_stone",
+}
+
+
 class BlockMaterial(BaseModel):
     """材料描述（含位置标签，V2 方案第 11 部分）"""
 

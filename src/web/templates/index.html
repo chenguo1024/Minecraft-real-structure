@@ -73,56 +73,118 @@ const btnLoading = document.querySelector('.btn-loading');
 
 let selectedFiles = [];
 
-dropZone.addEventListener('click', () => fileInput.click());
+// 点击上传区域触发文件选择
+dropZone.addEventListener('click', (e) => {
+  // 不要阻止表单提交区域的点击
+  if (e.target === dropZone || e.target.closest('.upload-icon') || e.target.closest('.upload-text') || e.target.closest('.upload-hint')) {
+    fileInput.click();
+  }
+});
+
+// 拖拽事件
+dropZone.addEventListener('dragenter', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  dropZone.classList.add('dragover');
+});
 
 dropZone.addEventListener('dragover', (e) => {
   e.preventDefault();
+  e.stopPropagation();
   dropZone.classList.add('dragover');
 });
-dropZone.addEventListener('dragleave', () => {
-  dropZone.classList.remove('dragover');
-});
-dropZone.addEventListener('drop', (e) => {
+
+dropZone.addEventListener('dragleave', (e) => {
   e.preventDefault();
-  dropZone.classList.remove('dragover');
-  if (e.dataTransfer.files.length) {
-    selectedFiles = Array.from(e.dataTransfer.files);
-    fileInput.files = e.dataTransfer.files;
-    showPreviews(selectedFiles);
+  e.stopPropagation();
+  if (!dropZone.contains(e.relatedTarget)) {
+    dropZone.classList.remove('dragover');
   }
 });
 
-fileInput.addEventListener('change', () => {
-  if (fileInput.files.length) {
-    selectedFiles = Array.from(fileInput.files);
-    showPreviews(selectedFiles);
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  dropZone.classList.remove('dragover');
+  const dtFiles = e.dataTransfer.files;
+  if (dtFiles && dtFiles.length > 0) {
+    handleFiles(dtFiles);
   }
 });
+
+// 文件选择框 change 事件
+fileInput.addEventListener('change', () => {
+  if (fileInput.files && fileInput.files.length > 0) {
+    handleFiles(fileInput.files);
+  }
+});
+
+function handleFiles(fileList) {
+  // 只保留图片文件
+  selectedFiles = Array.from(fileList).filter(f => f.type.startsWith('image/'));
+  if (selectedFiles.length === 0) return;
+  showPreviews(selectedFiles);
+}
 
 function showPreviews(files) {
   previewList.innerHTML = '';
-  let loaded = 0;
+  preview.classList.remove('hidden');
+
   files.forEach((file, i) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const item = document.createElement('div');
       item.className = 'preview-item';
-      item.innerHTML = `<img src="${e.target.result}" alt="${file.name}"><span>${i+1}. ${file.name}</span>`;
+      item.innerHTML = `<img src="${e.target.result}" alt="${file.name}"><span>${i + 1}. ${file.name}</span>`;
       previewList.appendChild(item);
-      loaded++;
-      if (loaded === files.length) {
-        preview.classList.remove('hidden');
-        submitBtn.disabled = false;
-      }
     };
     reader.readAsDataURL(file);
   });
+
+  // 只要至少有一张图就启用提交按钮（不依赖 reader 完成回调）
+  submitBtn.disabled = false;
 }
 
-form.addEventListener('submit', () => {
+// 用 FormData 提交（确保拖拽的文件正确发送到后端）
+form.addEventListener('submit', (e) => {
+  e.preventDefault();
+
+  if (selectedFiles.length === 0) {
+    alert('请先选择图片');
+    return;
+  }
+
   submitBtn.disabled = true;
   btnText.classList.add('hidden');
   btnLoading.classList.remove('hidden');
+
+  const formData = new FormData();
+  selectedFiles.forEach(file => {
+    formData.append('images', file);
+  });
+  formData.append('version', document.getElementById('version').value);
+  formData.append('api_key', document.getElementById('apiKey').value);
+
+  fetch('/analyze-async', {
+    method: 'POST',
+    body: formData,
+  }).then(resp => resp.text()).then(html => {
+    // 提取 task_id 跳转到进度页
+    const match = html.match(/<script[^>]*task_id\s*=\s*'([^']+)'/);
+    if (match) {
+      window.location.href = '/result/' + match[1];
+    } else {
+      // 直接显示结果页内容
+      document.open();
+      document.write(html);
+      document.close();
+    }
+  }).catch(err => {
+    alert('提交失败: ' + err.message);
+    submitBtn.disabled = false;
+    btnText.classList.remove('hidden');
+    btnLoading.classList.add('hidden');
+  });
 });
 </script>
 </body>

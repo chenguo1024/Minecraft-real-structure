@@ -23,7 +23,6 @@ from src.generator.geometry import (
     generate_cylinder,
     generate_prism,
     generate_sphere,
-    rotate_y,
 )
 from src.models.building import BuildingDSL, Component
 

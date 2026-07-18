@@ -682,31 +682,3 @@ def get_template(
     return dsl
 
 
-def find_best_template(
-    style: str = "modern",
-    building_type: str = "house",
-    keywords: list[str] | None = None,
-) -> tuple[str, dict]:
-    """根据 style/keywords 找到最匹配的模板。
-
-    Returns:
-        (style_key, entry) 元组
-    """
-    # 精确匹配 style
-    if style in STYLE_TEMPLATES:
-        return style, STYLE_TEMPLATES[style]
-
-    # 按 type 映射
-    mapped = TYPE_STYLE_MAP.get(building_type)
-    if mapped and mapped in STYLE_TEMPLATES:
-        return mapped, STYLE_TEMPLATES[mapped]
-
-    # keywords 匹配
-    if keywords:
-        kw_lower = [k.lower() for k in keywords]
-        for skey, entry in STYLE_TEMPLATES.items():
-            if any(kw in entry["keywords"] for kw in kw_lower):
-                return skey, entry
-
-    # 默认
-    return "modern", STYLE_TEMPLATES["modern"]
