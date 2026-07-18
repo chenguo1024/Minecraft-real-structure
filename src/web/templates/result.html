@@ -25,7 +25,7 @@
           <tr><td>风格</td><td>{{ desc.style }}</td></tr>
           <tr><td>尺寸</td><td>{{ size_x }} × {{ size_y }} × {{ size_z }} 格</td></tr>
           <tr><td>精细度</td><td>{{ desc.detail_scale }} 格/米</td></tr>
-          <tr><td>楼层</td><td>{{ desc.floors }} 层</td></tr>
+          <tr><td>楼层</td><td>{{ desc.floor_count }} 层</td></tr>
           <tr><td>平面形状</td><td>{{ desc.shape }}</td></tr>
           <tr><td>方块总数</td><td>{{ block_total }}</td></tr>
         </table>
@@ -38,17 +38,26 @@
           <li>
             <span class="block-dot" style="background: {{ m.color or '#888' }}"></span>
             {{ m.name }}
-            <span class="fraction">{{ (m.fraction * 100)|int }}%</span>
+            {% if m.location %}<span class="location-tag">{{ m.location }}</span>{% endif %}
+            <span class="fraction">{{ m.percentage|int }}%</span>
           </li>
           {% endfor %}
         </ul>
       </section>
 
       <section class="card">
-        <h2>特征</h2>
+        <h2>结构与组件</h2>
         <ul class="feature-list">
-          {% for f in desc.features %}
-          <li>{{ f.feature_type }} {% if f.position %}({{ f.position }}){% endif %} ×{{ f.count }}</li>
+          <li><strong>屋顶</strong>: {{ desc.roof.type }} ({{ desc.roof.height }}格高, {{ desc.roof.layer_count }}层){% if desc.roof.has_flying_eaves %} · 飞檐{% endif %}</li>
+          <li><strong>入口</strong>: {{ desc.entrance.type }} ({{ desc.entrance.width }}×{{ desc.entrance.height }}){% if desc.entrance.has_stairs %} · 有台阶{% endif %}{% if desc.entrance.has_columns %} · 有门廊柱{% endif %}</li>
+          {% for c in desc.components %}
+          <li><strong>{{ c.name }}</strong>: {{ c.shape }} ({{ c.width }}×{{ c.length }}×{{ c.height }}){% if c.radius %} r={{ c.radius }}{% endif %} @ {{ c.position }}</li>
+          {% endfor %}
+          {% for curve in desc.curves %}
+          <li><strong>曲线</strong>: {{ curve.type }}{% if curve.arch_type %} ({{ curve.arch_type }}){% endif %} curv={{ curve.curvature }}</li>
+          {% endfor %}
+          {% for wall in desc.walls %}
+          <li><strong>墙体</strong>: {{ wall.type }} (厚{{ wall.thickness }}){% if wall.pillars.count %} · {{ wall.pillars.count }}根柱{% endif %}</li>
           {% endfor %}
         </ul>
       </section>
@@ -195,11 +204,13 @@
             <label>宽度: <input type="number" name="width" value="{{ size_x }}" min="1" max="128"></label>
             <label>高度: <input type="number" name="height" value="{{ size_y }}" min="1" max="128"></label>
             <label>深度: <input type="number" name="length" value="{{ size_z }}" min="1" max="128"></label>
-            <label>楼层: <input type="number" name="floors" value="{{ desc.floors }}" min="1" max="50"></label>
+            <label>楼层: <input type="number" name="floor_count" value="{{ desc.floor_count }}" min="1" max="50"></label>
             <label>精细度: <input type="number" name="detail_scale" value="{{ desc.detail_scale }}" min="1" max="8"></label>
             <label>风格: <input type="text" name="style" value="{{ desc.style }}"></label>
             <label>建筑类型: <input type="text" name="building_type" value="{{ desc.building_type }}"></label>
-            <label>屋顶样式: <input type="text" name="roof_type" value="{{ roof_type }}" placeholder="flat/gable/hip/pyramid/dome/xieshan/curved/eaved"></label>
+            <label>屋顶样式: <input type="text" name="roof_type" value="{{ roof_type }}" placeholder="flat/gable/hip/pyramid/dome/mansard/barrel/spire/chinese_roof"></label>
+            <label>屋顶高度: <input type="number" name="roof_height" value="{{ desc.roof.height }}" min="0" max="64"></label>
+            <label>屋顶层数: <input type="number" name="roof_layers" value="{{ desc.roof.layer_count }}" min="1" max="10"></label>
           </div>
           <button type="submit" class="btn btn-primary">重新生成</button>
         </form>

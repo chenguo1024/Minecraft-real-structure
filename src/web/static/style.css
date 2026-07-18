@@ -202,6 +202,15 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   display: inline-block;
 }
 .fraction { margin-left: auto; color: var(--muted); font-size: 0.8rem; }
+.location-tag {
+  display: inline-block;
+  background: rgba(100,150,200,0.2);
+  color: #8ab4dc;
+  padding: 0.05rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  margin-left: 0.3rem;
+}
 
 .palette-list {
   list-style: decimal;

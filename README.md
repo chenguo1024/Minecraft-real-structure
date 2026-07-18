@@ -1,4 +1,4 @@
-# Minecraft Real Structure v1.1.2
+# Minecraft Real Structure v1.2.0
 
 > AI 驱动的工具，将现实世界建筑照片转换成 Minecraft 三维结构（.nbt 文件）。
 > 
@@ -20,7 +20,7 @@
 | 方块生成 | Python + 颜色分组 BlockMap | 根据描述生成三维方块数组 |
 | NBT 导出 | 手写 NBT 二进制 (GZip) | 写入 Minecraft 结构文件 |
 | Web | FastAPI + Uvicorn + Jinja2 | HTTP 上传界面 |
-| 测试 | pytest (118 个测试) | 全链路测试覆盖 |
+| 测试 | pytest (216 个测试) | 全链路测试覆盖 |
 
 ## 项目结构
 
@@ -122,7 +122,7 @@ py -3 -m src.main mock -i photo.jpg -v java-1.20
 
 ```powershell
 py -3 -m pytest tests/ -q
-# 期望：118 passed
+# 期望：216 passed
 ```
 
 `pyproject.toml` 已配 `-p no:cacheprovider -q`，不需要额外参数。常见报错：

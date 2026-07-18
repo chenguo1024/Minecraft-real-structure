@@ -1,102 +1,201 @@
-"""增强分析器 —— AI 分析 + Wikipedia 数据融合 + 多角度照片分析。
+"""V2 Agent 3：多视角建筑融合 —— AI 分析 + Wikipedia 数据融合 + 多角度照片合并。
 
-设计理由：
-  1. AI 分析单张照片估算尺寸不准确，用 Wikipedia 真实数据替换。
-  2. 如果识别出建筑名称，自动查 Wikipedia 获取真实尺寸/风格/材料。
-  3. 支持上传多张照片（不同角度），分析后合并结果。
-  4. 如果有 Wikipedia 真实高度，用真实高度换算 Minecraft 方块数。
+按 V2 技术方案：
+  1. 多张照片分别走 ai_analyzer.analyze() → BuildingDSL
+  2. 合并多视角结果（取最大尺寸、合并 components/curves、按方向去重 facades→windows）
+  3. 如果识别到建筑名称，查 Wikipedia 获取真实尺寸校准
+  4. 输出融合后的 BuildingDSL
+
+取代旧 enhanced_analyzer（基于 BuildingDescription）。
 """
-
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 from src.analysis.ai_analyzer import analyze as ai_analyze
-from src.models.building import BuildingDescription, BuildingFeature, MinecraftVersion
+from src.models.building import (
+    BlockMaterial,
+    BuildingDSL,
+    Component,
+    CurveSpec,
+    MinecraftVersion,
+    WallSpec,
+    WindowItem,
+)
 from src.utils.wikipedia import lookup_building, meters_to_blocks
 
 
-def _merge_descriptions(descs: list[BuildingDescription]) -> BuildingDescription:
-    """合并多张照片的分析结果（取最大尺寸、合并特征列表）。"""
-    if not descs:
-        raise ValueError("没有描述可以合并")
-    if len(descs) == 1:
-        return descs[0]
+def _merge_dsls(dsls: list[BuildingDSL]) -> BuildingDSL:
+    """合并多张照片的 BuildingDSL（Agent 3 核心逻辑）。
 
-    base = descs[0].model_copy(deep=True)
+    策略：
+      - 尺寸取最大（不同角度看到的不同维度）
+      - components 合并去重（按 name）
+      - curves 合并去重（按 type+center）
+      - windows.items 合并（按 side 去重，后覆盖前）
+      - walls 合并（按 type 去重）
+      - materials 合并（按 name 去重）
+      - building_name/location/keywords 取首个非空
+      - description 拼接所有角度的描述
+    """
+    if not dsls:
+        raise ValueError("没有 DSL 可以合并")
+    if len(dsls) == 1:
+        return dsls[0]
 
-    for d in descs[1:]:
+    base = dsls[0].model_copy(deep=True)
+
+    for d in dsls[1:]:
         # 取最大尺寸
         base.height = max(base.height, d.height)
         base.width = max(base.width, d.width)
         base.length = max(base.length, d.length)
-        base.floors = max(base.floors, d.floors)
+        base.floor_count = max(base.floor_count, d.floor_count)
         base.detail_scale = max(base.detail_scale, d.detail_scale)
 
-        # 如果某张识别到建筑名称，保留
+        # 元信息：取首个非空
         if d.building_name and not base.building_name:
             base.building_name = d.building_name
-        if d.building_type and d.building_type != base.building_type:
-            base.building_type = d.building_type
+        if d.location and not base.location:
+            base.location = d.location
+        if d.style and d.style != "modern" and base.style == "modern":
+            base.style = d.style
+        if d.keywords:
+            existing = set(base.keywords)
+            for kw in d.keywords:
+                if kw not in existing:
+                    base.keywords.append(kw)
+                    existing.add(kw)
 
-        # 合并特征（去重）
-        existing_types = {f.feature_type for f in base.features}
-        for f in d.features:
-            if f.feature_type not in existing_types:
-                base.features.append(f)
-                existing_types.add(f.feature_type)
+        # components 合并去重（按 name）
+        existing_comp_names = {c.name for c in base.components}
+        for c in d.components:
+            if c.name not in existing_comp_names:
+                base.components.append(c)
+                existing_comp_names.add(c.name)
 
-        # 追加描述
+        # curves 合并去重（按 type+center 近似）
+        for curve in d.curves:
+            # 简单去重：同 type 且 center 相同的跳过
+            is_dup = any(
+                c.type == curve.type
+                and c.center_x == curve.center_x
+                and c.center_y == curve.center_y
+                and c.center_z == curve.center_z
+                for c in base.curves
+            )
+            if not is_dup:
+                base.curves.append(curve)
+
+        # windows.items 合并（按 side+floor+x 近似去重，后覆盖前）
+        for new_win in d.windows.items:
+            is_dup = any(
+                w.side == new_win.side
+                and w.floor == new_win.floor
+                and abs(w.x - new_win.x) < 0.05
+                for w in base.windows.items
+            )
+            if is_dup:
+                # 后覆盖前：移除旧的，加新的
+                base.windows.items = [
+                    w for w in base.windows.items
+                    if not (w.side == new_win.side
+                            and w.floor == new_win.floor
+                            and abs(w.x - new_win.x) < 0.05)
+                ]
+            base.windows.items.append(new_win)
+
+        # walls 合并（按 type 去重，后覆盖前）
+        for new_wall in d.walls:
+            base.walls = [w for w in base.walls if w.type != new_wall.type]
+            base.walls.append(new_wall)
+
+        # materials 合并（按 name 去重）
+        existing_mat_names = {m.name for m in base.materials}
+        for m in d.materials:
+            if m.name not in existing_mat_names:
+                base.materials.append(m)
+                existing_mat_names.add(m.name)
+
+        # 屋顶：取更复杂的（layer_count 大的优先）
+        if d.roof.layer_count > base.roof.layer_count:
+            base.roof = d.roof.model_copy(deep=True)
+
+        # 入口：取更复杂的（has_stairs/has_columns 多的优先）
+        d_ent_complex = sum([d.entrance.has_stairs, d.entrance.has_columns,
+                             d.entrance.has_roof_cover])
+        base_ent_complex = sum([base.entrance.has_stairs, base.entrance.has_columns,
+                                base.entrance.has_roof_cover])
+        if d_ent_complex > base_ent_complex:
+            base.entrance = d.entrance.model_copy(deep=True)
+
+        # 全局部位材质：取首个非默认值
+        for attr in ("platform_material", "roof_material", "door_material",
+                     "window_glass_material", "wall_material", "pillar_material",
+                     "trim_material", "railing_material", "cornice_material",
+                     "foundation_material"):
+            base_val = getattr(base, attr)
+            d_val = getattr(d, attr)
+            # 默认值清单
+            defaults = {
+                "platform_material": "stone_bricks",
+                "roof_material": "stone_bricks",
+                "door_material": "dark_oak_door",
+                "window_glass_material": "glass",
+                "wall_material": "stone_bricks",
+                "pillar_material": "chiseled_stone_bricks",
+                "trim_material": "polished_andesite",
+                "railing_material": "oak_fence",
+                "cornice_material": "polished_andesite",
+                "foundation_material": "smooth_stone",
+            }
+            if base_val == defaults.get(attr, "") and d_val != defaults.get(attr, ""):
+                setattr(base, attr, d_val)
+
+        # 拼接描述
         if d.description:
             base.description += f"\n--- 另一角度 ---\n{d.description}"
-
-        # 合并 facades（按方向去重，后相同方向覆盖前）
-        if d.facades:
-            existing_faces = {f.face for f in base.facades}
-            for f in d.facades:
-                if f.face in existing_faces:
-                    base.facades = [x for x in base.facades if x.face != f.face]
-                base.facades.append(f)
-                existing_faces.add(f.face)
+        if d.decorations_description and not base.decorations_description:
+            base.decorations_description = d.decorations_description
 
     return base
 
 
 def _apply_wikipedia_data(
-    desc: BuildingDescription,
-    wiki_data: dict | None,
-) -> BuildingDescription:
-    """用 Wikipedia 真实数据替换 AI 估算值。"""
+    dsl: BuildingDSL,
+    wiki_data: Optional[dict],
+) -> BuildingDSL:
+    """用 Wikipedia 真实数据校准 BuildingDSL 尺寸。"""
     if not wiki_data:
-        return desc
+        return dsl
 
-    result = desc.model_copy(deep=True)
+    result = dsl.model_copy(deep=True)
 
     # 用真实高度替换
     if "height_meters" in wiki_data:
         real_blocks = meters_to_blocks(wiki_data["height_meters"])
-        if real_blocks > desc.height:
+        if real_blocks > dsl.height:
             result.height = real_blocks
 
     # 用真实楼层数替换
     if "floor_count_int" in wiki_data:
-        result.floors = wiki_data["floor_count_int"]
+        result.floor_count = wiki_data["floor_count_int"]
 
     # 根据建筑尺寸自动推荐精细度
     max_dim = max(result.height, result.width, result.length)
     if max_dim <= 20:
-        result.detail_scale = 3  # 小型建筑极精细
+        result.detail_scale = 3
     elif max_dim <= 50:
-        result.detail_scale = 2  # 中型建筑精细
+        result.detail_scale = 2
     else:
-        result.detail_scale = 1  # 大型建筑标准
+        result.detail_scale = 1
 
-    # 风格和材料只做参考补充，不改 AI 视觉分析的结果
+    # 风格只做参考补充
     if "architectural_style" in wiki_data:
         style = wiki_data["architectural_style"].lower()
         mapped = _map_style(style)
-        if mapped and mapped != "modern":
-            # 只有 Wikipedia 风格明确时才覆盖
+        if mapped and mapped != "modern" and result.style == "modern":
             result.style = mapped
 
     # 附加 Wikipedia 信息到描述
@@ -125,76 +224,55 @@ def _map_style(style: str) -> str:
         return "classical"
     if "renaissance" in style:
         return "classical"
+    if "baroque" in style or "rococo" in style:
+        return "baroque"
     if "modern" in style or "contemporary" in style or "brutalist" in style:
         return "modern"
     if "chinese" in style or "japanese" in style or "asian" in style:
-        return "asian"
+        return "chinese_traditional"
     if "medieval" in style or "romanesque" in style:
         return "medieval"
-    if "victorian" in style or "baroque" in style or "rococo" in style:
+    if "victorian" in style:
         return "classical"
     return "modern"
-
-
-def _map_material(mat_text: str) -> list | None:
-    """将 Wikipedia 材料文本映射为 Minecraft 材料列表。"""
-    from src.models.building import BlockMaterial
-
-    mapping = {
-        "concrete": "concrete",
-        "steel": "iron_block",
-        "glass": "glass",
-        "stone": "stone",
-        "marble": "quartz_block",
-        "granite": "granite",
-        "limestone": "stone",
-        "brick": "bricks",
-        "wood": "oak_planks",
-        "timber": "oak_planks",
-        "sandstone": "sandstone",
-        "copper": "copper_block",
-        "iron": "iron_block",
-        "gold": "gold_block",
-    }
-
-    materials = []
-    for keyword, block_name in mapping.items():
-        if keyword in mat_text:
-            materials.append(BlockMaterial(name=block_name, fraction=0.5))
-    return materials if materials else None
 
 
 def analyze(
     image_paths: list[str],
     version: MinecraftVersion = MinecraftVersion.JAVA_1_20,
-    api_key: str | None = None,
-) -> BuildingDescription:
-    """增强分析：多张照片 + AI + Wikipedia。
+    api_key: Optional[str] = None,
+) -> BuildingDSL:
+    """V2 Agent 3：多视角建筑融合。
+
+    流程：
+      1. 每张照片走 ai_analyzer.analyze() → BuildingDSL
+      2. 合并多视角结果（_merge_dsls）
+      3. 如果识别到建筑名称，查 Wikipedia 校准尺寸
+      4. 返回融合后的 BuildingDSL
 
     Args:
-        image_paths: 一张或多张照片路径。
-        version: Minecraft 版本。
-        api_key: 智谱 API Key。
+        image_paths: 一张或多张照片路径
+        version: Minecraft 版本
+        api_key: 智谱 API Key
 
     Returns:
-        融合后的建筑描述。
+        BuildingDSL
     """
     # 1. 分别分析每张照片
-    descs = []
+    dsls = []
     for path in image_paths:
-        desc = ai_analyze(path, version, api_key)
-        descs.append(desc)
+        dsl = ai_analyze(path, version, api_key=api_key)
+        dsls.append(dsl)
 
-    # 2. 合并多角度结果
-    merged = _merge_descriptions(descs)
+    # 2. 合并多视角结果
+    merged = _merge_dsls(dsls)
 
-    # 3. 如果识别到具体的建筑名称，查 Wikipedia（只查完整名称，避免误匹配）
+    # 3. 如果识别到具体建筑名称，查 Wikipedia
     wiki_data = None
     if merged.building_name and len(merged.building_name) >= 4:
-        # 只对具体名称（≥4个字符）查 Wikipedia
         wiki_data = lookup_building(merged.building_name)
 
-    # 4. 用 Wikipedia 数据增强
+    # 4. 用 Wikipedia 数据校准
     result = _apply_wikipedia_data(merged, wiki_data)
 
     return result

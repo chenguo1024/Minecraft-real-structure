@@ -1,133 +1,268 @@
-"""Mock 分析器 —— 覆盖多种建筑风格/形状/屋顶组合用于测试。"""
+"""V2 Mock 分析器 —— 输出 BuildingDSL 模板用于测试（不调真实 API）。
 
+覆盖多种建筑风格/形状/屋顶/component 组合，供集成测试和 CLI mock 模式用。
+"""
 from src.models.building import (
     BlockMaterial,
-    BuildingDescription,
-    BuildingFeature,
+    BuildingDSL,
+    Component,
+    CurveSpec,
+    EntranceSpec,
     MinecraftVersion,
+    PillarSpec,
+    RoofSpec,
+    WallSpec,
+    WindowItem,
+    WindowSystem,
 )
 
-# ── 预设模板 ──
 
-_MODERN_VILLA = BuildingDescription(
+# ── 模板 1：现代别墅 ──
+_MODERN_VILLA = BuildingDSL(
     minecraft_version=MinecraftVersion.JAVA_1_20,
+    building_name="",
     building_type="villa",
-    height=10, width=8, length=12,
+    style="modern",
+    location="",
+    width=12, length=10, height=8,
+    floor_count=2, floor_height=4, wall_thickness=1,
+    detail_scale=2,
     shape="rectangle",
-    style="modern",
-    floors=2,
+    components=[
+        Component(name="main_body", shape="box", width=12, length=10, height=8,
+                  position="center", material="white_concrete"),
+    ],
+    roof=RoofSpec(type="flat", height=1, material="gray_concrete"),
+    walls=[WallSpec(type="plain_wall", thickness=1, material="white_concrete")],
+    windows=WindowSystem(
+        arrangement="symmetry",
+        items=[
+            WindowItem(shape="square", floor=1, side="front", x=0.3, width=0.15, height=2, y_offset=1),
+            WindowItem(shape="square", floor=1, side="front", x=0.7, width=0.15, height=2, y_offset=1),
+            WindowItem(shape="square", floor=2, side="front", x=0.3, width=0.15, height=2, y_offset=1),
+            WindowItem(shape="square", floor=2, side="front", x=0.7, width=0.15, height=2, y_offset=1),
+        ],
+    ),
+    entrance=EntranceSpec(type="simple", position="center", side="front",
+                          width=2, height=3, door_material="dark_oak_door"),
     materials=[
-        BlockMaterial(name="stone_bricks", color="light_gray", fraction=0.6),
-        BlockMaterial(name="oak_planks", color="brown", fraction=0.25),
-        BlockMaterial(name="glass", color="light_blue", fraction=0.15),
+        BlockMaterial(name="white_concrete", color="white", percentage=60, location="wall"),
+        BlockMaterial(name="gray_concrete", color="gray", percentage=20, location="roof"),
+        BlockMaterial(name="glass", color="light_blue", percentage=15, location="window"),
+        BlockMaterial(name="dark_oak_door", color="brown", percentage=5, location="door"),
     ],
-    features=[
-        BuildingFeature(feature_type="door", position="front_center", count=1),
-        BuildingFeature(feature_type="window", position="front", count=4),
-        BuildingFeature(feature_type="roof", position="flat", count=1),
-    ],
-    description="Two-story modern villa with flat roof.",
+    platform_material="smooth_stone",
+    roof_material="gray_concrete",
+    door_material="dark_oak_door",
+    window_glass_material="glass",
+    wall_material="white_concrete",
+    description="Two-story modern villa with flat roof, white concrete walls, large windows.",
 )
 
-_L_SHAPE_VILLA = BuildingDescription(
+# ── 模板 2：中式城门（天安门风格）──
+_CHINESE_GATE = BuildingDSL(
     minecraft_version=MinecraftVersion.JAVA_1_20,
-    building_type="villa",
-    height=10, width=10, length=12,
-    shape="L",
-    style="modern",
-    floors=2,
+    building_name="城门",
+    building_type="gate",
+    style="chinese_traditional",
+    location="Beijing, China",
+    width=20, length=8, height=12,
+    floor_count=2, floor_height=4, wall_thickness=2,
+    detail_scale=2,
+    shape="rectangle",
+    components=[
+        Component(name="platform", shape="box", width=20, length=8, height=4,
+                  position="center", material="stone_bricks"),
+        Component(name="main_body", shape="box", width=20, length=8, height=6,
+                  offset_y=4, position="center", material="red_concrete"),
+    ],
+    roof=RoofSpec(type="chinese_roof", height=3, layer_count=2, overhang=2,
+                  has_flying_eaves=True, eaves_curvature=0.7,
+                  material="red_terracotta"),
+    walls=[WallSpec(type="pillar", thickness=2, material="red_concrete",
+                    pillars=PillarSpec(count=6, spacing=3, width=1,
+                                       material="chiseled_stone_bricks"))],
+    windows=WindowSystem(items=[
+        WindowItem(shape="arch", floor=2, side="front", x=0.5, width=0.2, height=2, y_offset=1),
+    ]),
+    entrance=EntranceSpec(type="portal", position="center", side="front",
+                          width=4, height=4, curvature=1.0,
+                          door_material="dark_oak_door",
+                          frame_material="red_terracotta"),
+    curves=[
+        CurveSpec(type="flying_eaves", direction="up", curvature=0.7,
+                  material="red_terracotta"),
+    ],
     materials=[
-        BlockMaterial(name="stone_bricks", color="light_gray", fraction=0.5),
-        BlockMaterial(name="glass", color="light_blue", fraction=0.2),
+        BlockMaterial(name="red_concrete", color="red", percentage=50, location="wall"),
+        BlockMaterial(name="red_terracotta", color="red", percentage=30, location="roof"),
+        BlockMaterial(name="stone_bricks", color="gray", percentage=15, location="platform"),
+        BlockMaterial(name="chiseled_stone_bricks", color="gray", percentage=5, location="pillar"),
     ],
-    features=[
-        BuildingFeature(feature_type="door", position="front_center", count=1),
-        BuildingFeature(feature_type="window", position="front", count=4),
-        BuildingFeature(feature_type="roof", position="flat", count=1),
-    ],
-    description="L-shaped modern villa.",
+    platform_material="stone_bricks",
+    roof_material="red_terracotta",
+    door_material="dark_oak_door",
+    wall_material="red_concrete",
+    pillar_material="chiseled_stone_bricks",
+    description="Chinese gate tower with red walls, stone platform, and flying eaves roof.",
+    keywords=["城门", "Chinese gate"],
 )
 
-_GOTHIC_CHURCH = BuildingDescription(
+# ── 模板 3：哥特教堂 ──
+_GOTHIC_CHURCH = BuildingDSL(
     minecraft_version=MinecraftVersion.JAVA_1_20,
+    building_name="",
     building_type="church",
-    height=18, width=10, length=20,
-    shape="cross",
     style="gothic",
-    floors=1,
+    width=16, length=30, height=20,
+    floor_count=1, floor_height=18, wall_thickness=2,
+    detail_scale=1,
+    shape="cross",
+    components=[
+        Component(name="main_body", shape="box", width=16, length=24, height=18,
+                  position="center", material="stone_bricks"),
+        Component(name="spire", shape="cone", radius=3, height=12,
+                  position="top", material="black_concrete"),
+    ],
+    roof=RoofSpec(type="spire", height=12, spire_height=12, spire_angle=30,
+                  material="black_concrete"),
+    walls=[WallSpec(type="buttress", thickness=2, material="stone_bricks",
+                    pillars=PillarSpec(count=8, spacing=3, protrusion=1,
+                                       material="chiseled_stone_bricks"))],
+    windows=WindowSystem(
+        arrangement="symmetry",
+        items=[
+            WindowItem(shape="pointed_arch", floor=1, side="front", x=0.5,
+                       width=0.3, height=6, y_offset=2,
+                       frame_material="chiseled_stone_bricks",
+                       glass_material="blue_stained_glass"),
+        ],
+    ),
+    entrance=EntranceSpec(type="portal", position="center", side="front",
+                          width=4, height=6, curvature=1.0,
+                          frame_material="chiseled_stone_bricks",
+                          door_material="dark_oak_door"),
     materials=[
-        BlockMaterial(name="stone_bricks", color="light_gray", fraction=0.7),
-        BlockMaterial(name="polished_andesite", color="gray", fraction=0.2),
-        BlockMaterial(name="glass", color="white", fraction=0.1),
+        BlockMaterial(name="stone_bricks", color="gray", percentage=70, location="wall"),
+        BlockMaterial(name="black_concrete", color="black", percentage=15, location="roof"),
+        BlockMaterial(name="blue_stained_glass", color="blue", percentage=10, location="window"),
+        BlockMaterial(name="chiseled_stone_bricks", color="gray", percentage=5, location="pillar"),
     ],
-    features=[
-        BuildingFeature(feature_type="door", position="front_center", count=1),
-        BuildingFeature(feature_type="window", position="front", count=6),
-        BuildingFeature(feature_type="roof", position="gable", count=1),
-    ],
-    description="Gothic church with cross-shaped floor plan and gabled roof.",
+    roof_material="black_concrete",
+    wall_material="stone_bricks",
+    pillar_material="chiseled_stone_bricks",
+    window_glass_material="blue_stained_glass",
+    description="Gothic church with stone walls, flying buttresses, pointed arch windows, and spire.",
 )
 
-_ASIAN_PAGODA = BuildingDescription(
+# ── 模板 4：圆塔 ──
+_ROUND_TOWER = BuildingDSL(
     minecraft_version=MinecraftVersion.JAVA_1_20,
-    building_type="pagoda",
-    height=14, width=8, length=8,
-    shape="rectangle",
-    style="asian",
-    floors=5,
+    building_type="tower",
+    style="medieval",
+    width=8, length=8, height=15,
+    floor_count=4, floor_height=3, wall_thickness=1,
+    detail_scale=2,
+    shape="circle",
+    components=[
+        Component(name="main_body", shape="cylinder", radius=4, height=12,
+                  position="center", material="stone_bricks"),
+    ],
+    roof=RoofSpec(type="cone", height=3, material="dark_oak_planks"),
+    walls=[WallSpec(type="plain_wall", thickness=1, material="stone_bricks")],
+    windows=WindowSystem(items=[
+        WindowItem(shape="arch", floor=2, side="front", x=0.5, width=0.15, height=2, y_offset=1),
+    ]),
+    entrance=EntranceSpec(type="arch", position="center", side="front",
+                          width=2, height=3, curvature=1.0,
+                          door_material="dark_oak_door"),
     materials=[
-        BlockMaterial(name="bricks", color="red", fraction=0.5),
-        BlockMaterial(name="oak_planks", color="brown", fraction=0.3),
+        BlockMaterial(name="stone_bricks", color="gray", percentage=80, location="wall"),
+        BlockMaterial(name="dark_oak_planks", color="brown", percentage=15, location="roof"),
+        BlockMaterial(name="glass", color="transparent", percentage=5, location="window"),
     ],
-    features=[
-        BuildingFeature(feature_type="door", position="front_center", count=1),
-        BuildingFeature(feature_type="window", position="front", count=4),
-        BuildingFeature(feature_type="roof", position="pyramid", count=1),
-    ],
-    description="Asian pagoda with pyramid roof.",
+    roof_material="dark_oak_planks",
+    wall_material="stone_bricks",
+    description="Medieval round tower with cylinder body and cone roof.",
 )
 
-_CLASSICAL_MANSION = BuildingDescription(
+# ── 模板 5：古典庙宇（穹顶）──
+_CLASSICAL_TEMPLE = BuildingDSL(
     minecraft_version=MinecraftVersion.JAVA_1_20,
-    building_type="mansion",
-    height=12, width=12, length=14,
-    shape="rectangle",
+    building_type="temple",
     style="classical",
-    floors=3,
+    width=12, length=12, height=10,
+    floor_count=1, floor_height=8, wall_thickness=1,
+    detail_scale=2,
+    shape="square",
+    components=[
+        Component(name="main_body", shape="box", width=12, length=12, height=8,
+                  position="center", material="quartz_block"),
+        Component(name="dome", shape="sphere", radius=5, height=5,
+                  offset_y=8, position="top", material="terracotta"),
+    ],
+    roof=RoofSpec(type="dome", height=5, material="terracotta"),
+    walls=[WallSpec(type="pillar", thickness=1, material="quartz_block",
+                    pillars=PillarSpec(count=8, spacing=1, width=1,
+                                       material="quartz_pillar"))],
+    windows=WindowSystem(items=[]),
+    entrance=EntranceSpec(type="column_entrance", position="center", side="front",
+                          width=3, height=4, has_columns=True, column_count=4,
+                          has_roof_cover=True,
+                          door_material="oak_door",
+                          frame_material="quartz_block"),
     materials=[
-        BlockMaterial(name="stone_bricks", color="light_gray", fraction=0.6),
-        BlockMaterial(name="polished_andesite", color="gray", fraction=0.3),
-        BlockMaterial(name="oak_planks", color="brown", fraction=0.1),
+        BlockMaterial(name="quartz_block", color="white", percentage=60, location="wall"),
+        BlockMaterial(name="terracotta", color="orange", percentage=25, location="roof"),
+        BlockMaterial(name="quartz_pillar", color="white", percentage=15, location="pillar"),
     ],
-    features=[
-        BuildingFeature(feature_type="door", position="front_center", count=1),
-        BuildingFeature(feature_type="window", position="front", count=6),
-        BuildingFeature(feature_type="roof", position="hip", count=1),
-    ],
-    description="Classical mansion with hip roof.",
+    platform_material="smooth_stone",
+    roof_material="terracotta",
+    wall_material="quartz_block",
+    pillar_material="quartz_pillar",
+    description="Classical temple with quartz walls, colonnade, and dome roof.",
 )
 
 
+# ── 模板注册表 ──
 TEMPLATES = {
-    "L_villa": _L_SHAPE_VILLA,
     "villa": _MODERN_VILLA,
+    "gate": _CHINESE_GATE,
     "church": _GOTHIC_CHURCH,
-    "pagoda": _ASIAN_PAGODA,
-    "mansion": _CLASSICAL_MANSION,
+    "tower": _ROUND_TOWER,
+    "temple": _CLASSICAL_TEMPLE,
 }
 
 
-def analyze(image_path: str, version: MinecraftVersion) -> BuildingDescription:
-    """根据路径关键词选择不同 Mock 模板（长关键词优先匹配）。"""
-    path_lower = image_path.lower()
-    # 按关键词长度降序排列，避免 "L_villa" 被 "villa" 拦截
-    sorted_keys = sorted(TEMPLATES.keys(), key=len, reverse=True)
-    for keyword in sorted_keys:
-        if keyword.lower() in path_lower:
-            template = TEMPLATES[keyword]
-            data = template.model_dump()
-            data["minecraft_version"] = version
-            return BuildingDescription(**data)
-    data = _MODERN_VILLA.model_dump()
-    data["minecraft_version"] = version
-    return BuildingDescription(**data)
+def analyze(
+    image_path: str,
+    version: MinecraftVersion = MinecraftVersion.JAVA_1_20,
+) -> BuildingDSL:
+    """Mock 分析：根据图片文件名选模板，返回 BuildingDSL。
+
+    选择规则：
+      - 文件名含 villa/house → 现代别墅
+      - 文件名含 gate/chinese → 中式城门
+      - 文件名含 church/cathedral → 哥特教堂
+      - 文件名含 tower/castle → 圆塔
+      - 文件名含 temple/palace → 古典庙宇
+      - 其他 → 默认别墅
+    """
+    from pathlib import Path
+    name = Path(image_path).stem.lower()
+
+    if any(kw in name for kw in ["gate", "chinese", "tiananmen"]):
+        template = _CHINESE_GATE
+    elif any(kw in name for kw in ["church", "cathedral", "gothic"]):
+        template = _GOTHIC_CHURCH
+    elif any(kw in name for kw in ["tower", "castle", "round"]):
+        template = _ROUND_TOWER
+    elif any(kw in name for kw in ["temple", "palace", "classical"]):
+        template = _CLASSICAL_TEMPLE
+    else:
+        template = _MODERN_VILLA
+
+    # 返回副本，避免修改模板
+    result = template.model_copy(deep=True)
+    result.minecraft_version = version
+    return result

@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "minecraft-real-structure"
-version = "1.1.2"
+version = "1.2.0"
 description = "AI 驱动的工具，将现实建筑照片转换成 Minecraft 三维结构"
 readme = "README.md"
 requires-python = ">=3.10"

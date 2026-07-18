@@ -1,50 +1,54 @@
-"""测试方块生成器（各屋顶类型、形状、风格模板、特征）。"""
+"""测试 V2 方块生成器（按 BuildingDSL component 级渲染）。
 
+覆盖：
+  - 基础 build 输出尺寸
+  - component 按 shape 渲染（box/cylinder/sphere/cone/prism/arch）
+  - 屋顶系统（flat/gable/hip/pyramid/dome/mansard/barrel/spire/chinese_roof）
+  - 墙体系统（pillar/buttress/arcade）
+  - 窗户系统（square/arch/pointed_arch/circle + 重复排列）
+  - 入口系统（simple/arch/portal/porch/grand_stair/column_entrance）
+  - 曲线系统（cylinder/dome/arch/flying_eaves）
+  - 部位材质生效
+  - 位置标签解析
+"""
 from src.generator.block_builder import BlockBuilder, BlockStructure
 from src.models.building import (
     BlockMaterial,
-    BuildingDescription,
-    BuildingFeature,
-    Facade,
-    FaceWindow,
-    FaceOpening,
+    BuildingDSL,
+    Component,
+    CurveSpec,
+    EntranceSpec,
     MinecraftVersion,
+    PillarSpec,
+    RoofSpec,
+    WallSpec,
+    WindowItem,
+    WindowSystem,
 )
 
 
-def _make_desc(
-    height: int = 8, width: int = 6, length: int = 10,
-    shape: str = "rectangle", style: str = "modern",
-    roof: str = "flat",
-    materials: list | None = None,
-    features: list | None = None,
-) -> BuildingDescription:
-    if features is None:
-        features = [BuildingFeature(feature_type="roof", position=roof)]
-    return BuildingDescription(
-        minecraft_version=MinecraftVersion.JAVA_1_20,
-        building_type="test",
-        height=height, width=width, length=length,
-        shape=shape, style=style,
-        materials=materials or [],
-        features=features,
+def _make_dsl(**overrides) -> BuildingDSL:
+    """构造测试用 BuildingDSL，默认最小主体 + 禁用默认入口（避免覆盖 front 面）。"""
+    params = dict(
+        building_type="house",
+        width=10,
+        length=10,
+        height=8,
+        entrance=EntranceSpec(type="simple", width=0, height=0),
     )
+    params.update(overrides)
+    return BuildingDSL(**params)
 
 
-class TestBlockStructure:
-    def test_structure_attributes(self):
-        s = BlockStructure(palette=["a", "b"], blocks=[0, 1, 0], size_x=1, size_y=1, size_z=3)
-        assert s.size_x == 1
-        assert s.size_y == 1
-        assert s.size_z == 3
-        assert len(s.blocks) == 3
-        assert len(s.palette) == 2
+def _idx(s: BlockStructure, x: int, y: int, z: int) -> int:
+    """从 BlockStructure 取 (x,y,z) 的 palette 索引。"""
+    return s.blocks[x + y * s.size_x + z * s.size_x * s.size_y]
 
 
 class TestBuildOutput:
     def test_output_has_correct_size(self):
-        desc = _make_desc(height=8, width=6, length=10)
-        builder = BlockBuilder(desc)
+        dsl = _make_dsl(width=6, length=10, height=8)
+        builder = BlockBuilder(dsl)
         s = builder.build()
         assert s.size_x == 6
         assert s.size_y == 8
@@ -52,564 +56,403 @@ class TestBuildOutput:
         assert len(s.blocks) == 6 * 8 * 10
 
     def test_palette_has_air(self):
-        desc = _make_desc()
-        builder = BlockBuilder(desc)
-        s = builder.build()
+        dsl = _make_dsl()
+        s = BlockBuilder(dsl).build()
         assert "minecraft:air" in s.palette
-        assert s.blocks.count(s.palette.index("minecraft:air")) > 0
 
-    def test_no_empty_palette(self):
-        desc = _make_desc()
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        assert len(s.palette) > 0
+    def test_empty_components_falls_back_to_main_body(self):
+        """无 components 时 fallback 画一个主体 box。"""
+        dsl = _make_dsl(width=4, length=4, height=4)
+        s = BlockBuilder(dsl).build()
+        # 主体 box 实心填充，至少有非空气方块
+        air_idx = s.palette.index("minecraft:air")
+        non_air = sum(1 for b in s.blocks if b != air_idx)
+        assert non_air > 0
 
 
-class TestRoofTypes:
-    """测试五种屋顶类型都能正常生成且不抛异常。"""
+class TestComponentRendering:
+    def test_box_component(self):
+        dsl = _make_dsl(
+            width=8, length=8, height=6,
+            components=[
+                Component(name="main_body", shape="box", width=6, length=6, height=4,
+                          material="stone_bricks"),
+            ],
+        )
+        s = BlockBuilder(dsl).build()
+        stone_idx = s.palette.index("minecraft:stone_bricks")
+        # box 中心应有 stone_bricks
+        assert _idx(s, 4, 2, 4) == stone_idx
 
-    @staticmethod
-    def _build_with_roof(roof_type: str) -> BlockStructure:
-        desc = _make_desc(roof=roof_type,
-                          features=[BuildingFeature(feature_type="roof", position=roof_type)])
-        return BlockBuilder(desc).build()
+    def test_cylinder_component(self):
+        dsl = _make_dsl(
+            width=12, length=12, height=10,
+            components=[
+                Component(name="tower", shape="cylinder", radius=4, height=8,
+                          position="center", material="stone_bricks"),
+            ],
+        )
+        s = BlockBuilder(dsl).build()
+        # 圆柱中心点应有
+        assert _idx(s, 6, 4, 6) != s.palette.index("minecraft:air")
 
+    def test_sphere_component(self):
+        dsl = _make_dsl(
+            width=10, length=10, height=10,
+            components=[
+                Component(name="dome", shape="sphere", radius=3, position="top",
+                          material="white_concrete"),
+            ],
+        )
+        s = BlockBuilder(dsl).build()
+        # 球心区域应有方块
+        air_idx = s.palette.index("minecraft:air")
+        assert _idx(s, 5, 3, 5) != air_idx
+
+    def test_cone_component(self):
+        dsl = _make_dsl(
+            width=10, length=10, height=10,
+            components=[
+                Component(name="spire", shape="cone", radius=3, height=8,
+                          position="top", material="black_concrete"),
+            ],
+        )
+        s = BlockBuilder(dsl).build()
+        # 圆锥底面中心应有
+        assert _idx(s, 5, 0, 5) != s.palette.index("minecraft:air")
+
+    def test_component_with_offset(self):
+        dsl = _make_dsl(
+            width=12, length=12, height=6,
+            components=[
+                Component(name="wing", shape="box", width=4, length=4, height=4,
+                          position="front_left_corner",
+                          offset_x=8, offset_z=8, material="oak_planks"),
+            ],
+        )
+        s = BlockBuilder(dsl).build()
+        oak_idx = s.palette.index("minecraft:oak_planks")
+        # front_left_corner → (0,0), +offset(8,8) → box 在 8~11
+        assert _idx(s, 9, 1, 9) == oak_idx
+
+    def test_position_front(self):
+        dsl = _make_dsl(
+            width=10, length=10, height=6,
+            components=[
+                Component(name="porch", shape="box", width=4, length=2, height=3,
+                          position="front", material="oak_planks"),
+            ],
+        )
+        s = BlockBuilder(dsl).build()
+        # front → z 偏移 0，x 居中 (10-4)/2=3, box x=3~6, z=0~1
+        oak_idx = s.palette.index("minecraft:oak_planks")
+        assert _idx(s, 4, 1, 0) == oak_idx
+
+
+class TestRoofRendering:
     def test_flat_roof(self):
-        s = self._build_with_roof("flat")
-        assert len(s.blocks) > 0
+        dsl = _make_dsl(width=6, length=6, height=4, roof=RoofSpec(type="flat"))
+        s = BlockBuilder(dsl).build()
+        # flat roof 在 y=h-1=3 整层
+        assert _idx(s, 2, 3, 2) != s.palette.index("minecraft:air")
 
     def test_gable_roof(self):
-        s = self._build_with_roof("gable")
-        assert len(s.blocks) > 0
-
-    def test_hip_roof(self):
-        s = self._build_with_roof("hip")
-        assert len(s.blocks) > 0
+        dsl = _make_dsl(width=6, length=6, height=6, roof=RoofSpec(type="gable", height=3))
+        s = BlockBuilder(dsl).build()
+        # gable 屋顶应有非空气方块在顶层
+        assert _idx(s, 2, 5, 3) != s.palette.index("minecraft:air")
 
     def test_pyramid_roof(self):
-        s = self._build_with_roof("pyramid")
-        assert len(s.blocks) > 0
+        dsl = _make_dsl(width=8, length=8, height=6, roof=RoofSpec(type="pyramid", height=3))
+        s = BlockBuilder(dsl).build()
+        # 金字塔顶中心应有
+        assert _idx(s, 4, 5, 4) != s.palette.index("minecraft:air")
 
     def test_dome_roof(self):
-        s = self._build_with_roof("dome")
-        assert len(s.blocks) > 0
+        dsl = _make_dsl(width=10, length=10, height=8, roof=RoofSpec(type="dome", height=4))
+        s = BlockBuilder(dsl).build()
+        # 穹顶中心应有
+        assert _idx(s, 5, 7, 5) != s.palette.index("minecraft:air")
 
-    def test_invalid_roof_fallsback_to_flat(self):
-        desc = _make_desc(roof="unknown",
-                          features=[BuildingFeature(feature_type="roof", position="unknown")])
-        s = BlockBuilder(desc).build()
-        assert len(s.blocks) > 0
+    def test_spire_roof(self):
+        dsl = _make_dsl(width=8, length=8, height=10, roof=RoofSpec(type="spire", height=5))
+        s = BlockBuilder(dsl).build()
+        # 尖塔底面中心应有
+        assert _idx(s, 4, 7, 4) != s.palette.index("minecraft:air")
 
-    def test_xieshan_roof(self):
-        s = self._build_with_roof("xieshan")
-        assert len(s.blocks) > 0
-
-    def test_curved_roof(self):
-        s = self._build_with_roof("curved")
-        assert len(s.blocks) > 0
-
-    def test_eaved_roof(self):
-        desc = _make_desc(
-            roof="eaved",
-            features=[BuildingFeature(feature_type="roof", position="eaved")],
+    def test_chinese_roof_with_eaves(self):
+        dsl = _make_dsl(
+            width=10, length=10, height=8,
+            roof=RoofSpec(type="chinese_roof", height=3, has_flying_eaves=True,
+                          eaves_curvature=0.8, material="red_terracotta"),
         )
-        s = BlockBuilder(desc).build()
-        assert len(s.blocks) > 0
+        s = BlockBuilder(dsl).build()
+        # 不崩即可
+        assert len(s.blocks) == 10 * 10 * 8
 
+    def test_mansard_roof(self):
+        dsl = _make_dsl(width=8, length=8, height=8, roof=RoofSpec(type="mansard", height=4))
+        s = BlockBuilder(dsl).build()
+        assert len(s.blocks) == 8 * 8 * 8
 
-class TestShapes:
-    """测试四种建筑平面形状。"""
+    def test_barrel_roof(self):
+        dsl = _make_dsl(width=8, length=8, height=8, roof=RoofSpec(type="barrel", height=3))
+        s = BlockBuilder(dsl).build()
+        assert len(s.blocks) == 8 * 8 * 8
 
-    @staticmethod
-    def _build_with_shape(shape: str) -> BlockStructure:
-        desc = _make_desc(height=10, width=12, length=14, shape=shape)
-        return BlockBuilder(desc).build()
-
-    def test_rectangle(self):
-        s = self._build_with_shape("rectangle")
-        assert len(s.blocks) == 12 * 10 * 14
-
-    def test_L_shape(self):
-        s = self._build_with_shape("L")
-        assert len(s.blocks) == 12 * 10 * 14
-
-    def test_cross_shape(self):
-        s = self._build_with_shape("cross")
-        assert len(s.blocks) == 12 * 10 * 14
-
-    def test_T_shape(self):
-        s = self._build_with_shape("T")
-        assert len(s.blocks) == 12 * 10 * 14
-
-
-class TestStyleTemplates:
-    """测试六种风格模板能正常生效。"""
-
-    STYLES = ["modern", "gothic", "classical", "asian", "medieval", "brutalist"]
-
-    def test_all_styles(self):
-        for style in self.STYLES:
-            desc = _make_desc(style=style)
-            s = BlockBuilder(desc).build()
-            assert len(s.blocks) > 0
-
-    def test_unknown_style_fallsback(self):
-        desc = _make_desc(style="nonexistent_style")
-        s = BlockBuilder(desc).build()
-        assert len(s.blocks) > 0
-
-
-class TestFeatures:
-    def test_door_adds_air(self):
-        desc = _make_desc(
-            features=[
-                BuildingFeature(feature_type="door", position="front", count=1),
-                BuildingFeature(feature_type="roof", position="flat"),
-            ],
+    def test_roof_material_overrides_global(self):
+        dsl = _make_dsl(
+            width=6, length=6, height=4,
+            roof=RoofSpec(type="flat", material="black_concrete"),
         )
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        air_idx = s.palette.index("minecraft:air")
-        front_z = 0
-        for dx in range(s.size_x):
-            for dy in range(1, 3):
-                idx = dx + dy * s.size_x + front_z * s.size_x * s.size_y
-                center_start = s.size_x // 2 - 1
-                if center_start <= dx <= center_start + 1 and dy <= 2:
-                    assert s.blocks[idx] == air_idx, f"门洞 ({dx},{dy}) 应为空气"
-
-    def test_modern_has_polished_andesite(self):
-        """modern 风格的屋顶边缘使用 polished_andesite。"""
-        desc = _make_desc(height=10, style="modern")
-        s = BlockBuilder(desc).build()
-        assert "minecraft:polished_andesite" in s.palette
-
-    def test_pillar_styles_config(self):
-        """gothic/classical styles have wall_pillar=True in config."""
-        from src.generator.block_builder import STYLE_DEFAULTS
-        assert STYLE_DEFAULTS["gothic"]["wall_pillar"] is True
-        assert STYLE_DEFAULTS["classical"]["wall_pillar"] is True
-        assert STYLE_DEFAULTS["modern"]["wall_pillar"] is False
-        assert STYLE_DEFAULTS["brutalist"]["wall_pillar"] is False
-
-    def test_flat_roof_all_styles_have_polished_andesite(self):
-        """所有平顶风格的屋顶边缘都使用 polished_andesite。"""
-        for style in ["modern", "brutalist"]:
-            desc = _make_desc(height=8, width=8, length=10, style=style, roof="flat")
-            s = BlockBuilder(desc).build()
-            assert "minecraft:polished_andesite" in s.palette
+        s = BlockBuilder(dsl).build()
+        bc_idx = s.palette.index("minecraft:black_concrete")
+        assert _idx(s, 2, 3, 2) == bc_idx
 
 
-class TestBuilderEdgeCases:
-    def test_minimal_dimensions(self):
-        desc = _make_desc(height=3, width=3, length=3)
-        s = BlockBuilder(desc).build()
-        assert len(s.blocks) == 27
-
-    def test_large_dimensions(self):
-        desc = _make_desc(height=30, width=20, length=30)
-        s = BlockBuilder(desc).build()
-        assert len(s.blocks) == 20 * 30 * 30
-
-    def test_materials_names_are_resolved(self):
-        desc = _make_desc(
-            materials=[BlockMaterial(name="glass", fraction=1.0)],
+class TestWallRendering:
+    def test_pillar_wall(self):
+        dsl = _make_dsl(
+            width=12, length=8, height=8,
+            walls=[WallSpec(type="pillar", material="stone_bricks",
+                            pillars=PillarSpec(count=4, spacing=3, width=1,
+                                               material="chiseled_stone_bricks"))],
         )
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        assert "minecraft:glass" in s.palette
+        s = BlockBuilder(dsl).build()
+        chisel_idx = s.palette.index("minecraft:chiseled_stone_bricks")
+        # 4 根柱子沿正面均匀分布，第 1 根在 x=1
+        assert _idx(s, 1, 3, 0) == chisel_idx
 
-
-class TestFacades:
-    """测试逐面生成（facades）功能。"""
-
-    def _facade_desc(self, **overrides) -> BuildingDescription:
-        params = dict(
-            minecraft_version=MinecraftVersion.JAVA_1_20,
-            building_type="house",
-            height=10, width=12, length=12,
-            style="modern",
-            materials=[BlockMaterial(name="stone_bricks")],
-            features=[BuildingFeature(feature_type="roof", position="flat")],
-            facades=[
-                Facade(face="front", material="stone_bricks",
-                       windows=[FaceWindow(x=0.5, width=0.2, height=2, y_offset=2)],
-                       openings=[FaceOpening(x=0.5, width=0.3, height=3, style="rectangle")]),
-            ],
+    def test_arcade_wall(self):
+        dsl = _make_dsl(
+            width=12, length=8, height=8,
+            walls=[WallSpec(type="arcade", material="stone_bricks",
+                            pillars=PillarSpec(count=4, spacing=3,
+                                               material="quartz_pillar"))],
         )
-        params.update(overrides)
-        return BuildingDescription(**params)
+        s = BlockBuilder(dsl).build()
+        # 柱子 + 拱，不崩即可
+        assert len(s.blocks) == 12 * 8 * 8
 
-    def test_facades_route_to_separate_path(self):
-        """facades 非空时触发 _build_from_facades 路径。"""
-        desc = self._facade_desc()
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        assert len(s.blocks) == 12 * 10 * 12
 
-    def test_facade_front_wall_exists(self):
-        """正面墙（z=0）有墙块。"""
-        desc = self._facade_desc()
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        air_idx = s.palette.index("minecraft:air")
-        # z=0, y=2, x=6 应在窗户区域或门洞区域，但我们先检查墙存在
-        # y=3 超出窗户高度应在墙区域
-        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
-        # 正面墙中间偏右（非窗户非门）应为实心
-        solid = s.blocks[idx(2, 4, 0)]
-        assert solid != air_idx, "正面墙中间应为实心块"
-
-    def test_facade_creates_window(self):
-        """正面窗户位置应为玻璃。"""
-        desc = self._facade_desc()
-        builder = BlockBuilder(desc)
-        s = builder.build()
+class TestWindowRendering:
+    def test_single_window(self):
+        dsl = _make_dsl(
+            width=10, length=8, height=8,
+            windows=WindowSystem(items=[
+                WindowItem(shape="square", floor=1, side="front",
+                           x=0.5, width=0.2, height=2, y_offset=1,
+                           glass_material="glass", frame_material="oak_planks"),
+            ]),
+        )
+        s = BlockBuilder(dsl).build()
         glass_idx = s.palette.index("minecraft:glass")
-        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
-        # 窗在 x=int(0.5*11)=5, y=2..3。但 y=2 被门洞覆盖，y=3 应为玻璃
-        win_block = s.blocks[idx(5, 3, 0)]
-        assert win_block == glass_idx, f"窗户位置 x=5,y=3,z=0 应为玻璃，实际索引 {win_block}"
+        # 窗中心 x=int(0.5*9)=4, y=1+1=2, z=0
+        assert _idx(s, 4, 2, 0) == glass_idx
 
-    def test_facade_creates_door_opening(self):
-        """正面门洞区域应为空气。"""
-        desc = self._facade_desc()
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        air_idx = s.palette.index("minecraft:air")
-        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
-        # 门在 x=int(0.5*12)=5, width=int(0.3*12)=3, 所以 x=4~6, y=0~2
-        for dx in range(4, 7):
-            assert s.blocks[idx(dx, 1, 0)] == air_idx, f"门洞 x={dx},y=1 应为空气"
-
-    def test_facade_multiple_faces(self):
-        """多面同时生效。"""
-        desc = self._facade_desc(
-            facades=[
-                Facade(face="front", material="stone_bricks",
-                       openings=[FaceOpening(x=0.5, width=0.3, height=3)]),
-                Facade(face="back", material="quartz_block",
-                       windows=[FaceWindow(x=0.3, width=0.2, height=2, y_offset=2)]),
-            ],
+    def test_window_frame(self):
+        dsl = _make_dsl(
+            width=10, length=8, height=8,
+            windows=WindowSystem(items=[
+                WindowItem(shape="square", floor=1, side="front",
+                           x=0.5, width=0.2, height=2, y_offset=1,
+                           frame_material="dark_oak_planks"),
+            ]),
         )
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        assert "minecraft:quartz_block" in s.palette, "背面用了不同材料"
+        s = BlockBuilder(dsl).build()
+        oak_idx = s.palette.index("minecraft:dark_oak_planks")
+        # 窗框在窗左侧 x=3, y=2, z=0
+        assert _idx(s, 3, 2, 0) == oak_idx
 
-    def test_facade_columns_placed(self):
-        """立柱被正确放置。"""
-        desc = self._facade_desc(
-            facades=[
-                Facade(face="front", material="stone_bricks",
-                       columns=[0.1, 0.5, 0.9]),
-            ],
+    def test_arch_window(self):
+        dsl = _make_dsl(
+            width=10, length=8, height=10,
+            windows=WindowSystem(items=[
+                WindowItem(shape="arch", floor=1, side="front",
+                           x=0.5, width=0.3, height=3, y_offset=1,
+                           frame_material="quartz_block"),
+            ]),
         )
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        stone_idx = s.palette.index("minecraft:stone_bricks")
-        air_idx = s.palette.index("minecraft:air")
-        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
-        # 柱子使用默认材料 (stone_bricks)，位置 int(0.1*11)=1, int(0.5*11)=5, int(0.9*11)=9
-        for col_x in [1, 5, 9]:
-            block = s.blocks[idx(col_x, 2, 0)]
-            assert block == stone_idx, f"x={col_x} 应为 stone_bricks"
-
-    def test_facade_no_windows_without_feature(self):
-        """没有 windows 列表时不开窗。"""
-        from src.generator.block_builder import MAT_WINDOW
-        desc = self._facade_desc(
-            facades=[Facade(face="front", material="stone_bricks")],
-        )
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        # 正面整面墙应无玻璃窗
-        if "minecraft:glass" in s.palette:
-            glass_idx = s.palette.index("minecraft:glass")
-            idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
-            for x in range(s.size_x):
-                for y in range(1, s.size_y - 1):
-                    block = s.blocks[idx(x, y, 0)]
-                    assert block != glass_idx, f"正面 ({x},{y}) 不应有玻璃"
-
-    def test_facade_cornice(self):
-        """檐口线脚被放置。"""
-        desc = self._facade_desc(
-            materials=[BlockMaterial(name="stone_bricks"), BlockMaterial(name="polished_andesite")],
-            facades=[Facade(face="front", material="stone_bricks", cornice=True)],
-        )
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        andesite_idx = s.palette.index("minecraft:polished_andesite")
-        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
-        # 檐口在 y=h-1=9 (wy2+1), z=0
-        cornice_block = s.blocks[idx(3, 9, 0)]
-        assert cornice_block == andesite_idx, "檐口应为 polished_andesite"
-
-    def test_facade_back_mirrors_config(self):
-        """背面独立于正面。"""
-        desc = self._facade_desc(
-            materials=[BlockMaterial(name="stone_bricks"), BlockMaterial(name="quartz_block")],
-            facades=[
-                Facade(face="front", material="stone_bricks"),
-                Facade(face="back", material="quartz_block"),
-            ],
-        )
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
+        s = BlockBuilder(dsl).build()
+        # 拱顶应有 quartz_block
         qb_idx = s.palette.index("minecraft:quartz_block")
-        stone_idx = s.palette.index("minecraft:stone_bricks")
-        front = s.blocks[idx(3, 3, 0)]
-        back = s.blocks[idx(3, 3, s.size_z - 1)]
-        assert front == stone_idx, "正面应为 stone_bricks"
-        assert back == qb_idx, "背面应为 quartz_block"
+        found = False
+        for y in range(4, 8):
+            for x in range(2, 7):
+                if _idx(s, x, y, 0) == qb_idx:
+                    found = True
+                    break
+            if found:
+                break
+        assert found, "arch 窗顶应有 quartz_block"
 
-    def test_facade_all_faces_different(self):
-        """四个面各自独立材料。"""
-        desc = self._facade_desc(
-            materials=[
-                BlockMaterial(name="stone_bricks"),
-                BlockMaterial(name="quartz_block"),
-                BlockMaterial(name="red_terracotta"),
-                BlockMaterial(name="bricks"),
-            ],
-            facades=[
-                Facade(face="front", material="stone_bricks"),
-                Facade(face="back", material="quartz_block"),
-                Facade(face="left", material="red_terracotta"),
-                Facade(face="right", material="bricks"),
-            ],
+    def test_window_on_second_floor(self):
+        dsl = _make_dsl(
+            width=10, length=8, height=12, floor_count=2, floor_height=5,
+            windows=WindowSystem(items=[
+                WindowItem(shape="square", floor=2, side="front",
+                           x=0.5, width=0.2, height=2, y_offset=1,
+                           glass_material="glass"),
+            ]),
         )
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
-        palette = s.palette
-        assert palette[s.blocks[idx(3, 3, 0)]] == "minecraft:stone_bricks", "正面 stone_bricks"
-        assert palette[s.blocks[idx(3, 3, s.size_z - 1)]] == "minecraft:quartz_block", "背面 quartz_block"
-        assert palette[s.blocks[idx(0, 3, 3)]] == "minecraft:red_terracotta", "左侧 red_terracotta"
-        assert palette[s.blocks[idx(s.size_x - 1, 3, 3)]] == "minecraft:bricks", "右侧 bricks"
+        s = BlockBuilder(dsl).build()
+        glass_idx = s.palette.index("minecraft:glass")
+        # floor=2 → y_offset = 1 + (2-1)*5 = 6, 窗中心 y=6+1=7
+        assert _idx(s, 4, 7, 0) == glass_idx
 
-    def test_facade_arch_opening(self):
-        """拱门样式的开口。"""
-        desc = self._facade_desc(
-            facades=[
-                Facade(face="front", material="stone_bricks",
-                       openings=[FaceOpening(x=0.5, width=0.3, height=3, style="arch")]),
-            ],
+
+class TestEntranceRendering:
+    def test_simple_entrance(self):
+        dsl = _make_dsl(
+            width=10, length=8, height=8,
+            entrance=EntranceSpec(type="simple", position="center", side="front",
+                                  width=2, height=3),
         )
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
+        s = BlockBuilder(dsl).build()
         air_idx = s.palette.index("minecraft:air")
-        # 拱门底部应为空气
-        assert s.blocks[idx(5, 1, 0)] == air_idx, "拱门底部应为空气"
+        # 门洞中心 x=5, y=1, z=0 应为空气
+        assert _idx(s, 5, 1, 0) == air_idx
 
-    def test_facade_railings_placed(self):
-        """立面上栏杆被放置（覆盖 _add_facade_railings 未测分支）。"""
-        desc = self._facade_desc(
-            facades=[Facade(face="front", material="stone_bricks", railings=True)],
+    def test_arch_entrance(self):
+        dsl = _make_dsl(
+            width=10, length=8, height=8,
+            entrance=EntranceSpec(type="arch", position="center", side="front",
+                                  width=4, height=3, curvature=1.0,
+                                  frame_material="quartz_block"),
         )
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        andesite_idx = s.palette.index("minecraft:polished_andesite")
-        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
-        # rail_y = h//2 = 5, step = max(2, 11//6) = 2, 栏杆柱在 (2, 5, 0)
-        rail = s.blocks[idx(2, 5, 0)]
-        assert rail == andesite_idx, f"正面栏杆应为 polished_andesite，实际 {s.palette[rail]}"
+        s = BlockBuilder(dsl).build()
+        qb_idx = s.palette.index("minecraft:quartz_block")
+        # 拱顶应有 quartz_block
+        found = False
+        for y in range(3, 7):
+            for x in range(3, 7):
+                if _idx(s, x, y, 0) == qb_idx:
+                    found = True
+                    break
+            if found:
+                break
+        assert found, "arch 门顶应有 quartz_block"
 
-    def test_facade_path_generates_interior(self):
-        """facade 路径也应生成内部结构（家具椅腿证明 _build_interior 被调用）。"""
-        desc = self._facade_desc(
-            height=10, width=12, length=12,
-            features=[
-                BuildingFeature(feature_type="roof", position="flat"),
-                BuildingFeature(feature_type="furniture"),
-            ],
+    def test_entrance_with_stairs(self):
+        dsl = _make_dsl(
+            width=10, length=8, height=8,
+            entrance=EntranceSpec(type="grand_stair", position="center", side="front",
+                                  width=3, height=3, has_stairs=True, stair_count=3),
         )
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        andesite_idx = s.palette.index("minecraft:polished_andesite")
-        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
-        # _add_furniture 在中心 (cx, table_y+1, cz) = (6, 2, 6) 放椅腿 polished_andesite
-        leg = s.blocks[idx(6, 2, 6)]
-        assert leg == andesite_idx, (
-            f"facade 路径中心应有家具椅腿 polished_andesite，实际 {s.palette[leg]}"
+        s = BlockBuilder(dsl).build()
+        # 不崩即可
+        assert len(s.blocks) == 10 * 8 * 8
+
+    def test_entrance_with_columns(self):
+        dsl = _make_dsl(
+            width=10, length=8, height=8,
+            entrance=EntranceSpec(type="porch", position="center", side="front",
+                                  width=4, height=3, has_columns=True, column_count=2,
+                                  has_roof_cover=True),
         )
+        s = BlockBuilder(dsl).build()
+        assert len(s.blocks) == 10 * 8 * 8
 
-    def test_facade_path_generates_stairs(self):
-        """facade 路径 + stairs 特征时楼板上方应有楼梯方块。"""
-        desc = self._facade_desc(
-            height=12, width=10, length=12,
-            features=[
-                BuildingFeature(feature_type="roof", position="flat"),
-                BuildingFeature(feature_type="stairs"),
-            ],
+    def test_entrance_frame(self):
+        dsl = _make_dsl(
+            width=10, length=8, height=8,
+            entrance=EntranceSpec(type="simple", position="center", side="front",
+                                  width=2, height=3, frame_material="quartz_block"),
         )
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
-        air_idx = s.palette.index("minecraft:air")
-        # _add_stairs 在 stair_x=w-3=7, stair_z=1, y_base=1, step≥1 内放 mat_floor
-        # 该位置在建筑内部，若无楼梯应为空气；有楼梯则为非空气
-        got = s.blocks[idx(7, 2, 1)]
-        assert got != air_idx, "facade 路径内部应有楼梯方块，实际为空气"
+        s = BlockBuilder(dsl).build()
+        qb_idx = s.palette.index("minecraft:quartz_block")
+        # 门框左侧 ex1-1=3, y=1, z=0 (ex_center=4, ex1=3, ex2=5)
+        assert _idx(s, 2, 1, 0) == qb_idx
 
 
-class TestCurvesAndCircles:
-    """测试曲线/圆形辅助方法。"""
-
-    def test_circle_xz_places_blocks(self):
-        desc = _make_desc(roof="flat")
-        builder = BlockBuilder(desc)
-        builder._grid = [
-            [[builder._idx("air") for _ in range(builder.w)] for _ in range(builder.h)]
-            for _ in range(builder.l)
-        ]
-        builder._circle_xz(3, 4, 2, 1, "stone_bricks")
-        w, h, l = builder.w, builder.h, builder.l
-        grid = [builder._grid[z][y][x] for z in range(l) for y in range(h) for x in range(w)]
-        pal = builder._palette_list
-        # check a point on the circle ring
-        idx = lambda x, y, z: x + y * w + z * w * h
-        assert pal[grid[idx(3, 1, 2)]] == "minecraft:stone_bricks", "圆环上应有石砖"
-
-    def test_cylinder_y_builds_cylinder(self):
-        desc = _make_desc(roof="flat")
-        builder = BlockBuilder(desc)
-        builder._grid = [
-            [[builder._idx("air") for _ in range(builder.w)] for _ in range(builder.h)]
-            for _ in range(builder.l)
-        ]
-        builder._cylinder_y(3, 3, 1, 0, 5, "stone_bricks")
-        w, h, l = builder.w, builder.h, builder.l
-        grid = [builder._grid[z][y][x] for z in range(l) for y in range(h) for x in range(w)]
-        pal = builder._palette_list
-        idx = lambda x, y, z: x + y * w + z * w * h
-        # ring point at bottom
-        assert pal[grid[idx(3, 0, 2)]] == "minecraft:stone_bricks"
-        # ring point at top
-        assert pal[grid[idx(3, 5, 4)]] == "minecraft:stone_bricks"
-
-    def test_circle_xz_in_bounds(self):
-        """圆不超出边界。"""
-        desc = _make_desc(height=5, width=10, length=10, roof="flat")
-        builder = BlockBuilder(desc)
-        builder._grid = [
-            [[builder._idx("air") for _ in range(builder.w)] for _ in range(builder.h)]
-            for _ in range(builder.l)
-        ]
-        builder._circle_xz(8, 8, 3, 1, "stone_bricks")
-        w, h, l = builder.w, builder.h, builder.l
-        grid = [builder._grid[z][y][x] for z in range(l) for y in range(h) for x in range(w)]
-        pal = builder._palette_list
-        idx = lambda x, y, z: x + y * w + z * w * h
-        # 圆上一点 (dx=-3, dz=0 → x=5, z=8)
-        assert pal[grid[idx(5, 1, 8)]] == "minecraft:stone_bricks"
-
-
-class TestInterior:
-    """测试内部结构（楼梯/隔墙/家具）。"""
-
-    def test_stairs_generated(self):
-        desc = _make_desc(height=12, width=8, length=10,
-                          features=[
-                              BuildingFeature(feature_type="stairs"),
-                              BuildingFeature(feature_type="roof", position="flat"),
-                          ])
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        # _add_stairs: stair_x=w-3=5, stair_z=1, y_base=1, step=1 → (5,2,1) 应为 oak_planks
-        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
-        oak_idx = s.palette.index("minecraft:oak_planks")
-        assert s.blocks[idx(5, 2, 1)] == oak_idx, "内部应有楼梯方块（oak_planks）"
-
-    def test_room_partitions_generated(self):
-        desc = _make_desc(height=10, width=12, length=12,
-                          features=[
-                              BuildingFeature(feature_type="room"),
-                              BuildingFeature(feature_type="roof", position="flat"),
-                          ])
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
-        stone_idx = s.palette.index("minecraft:stone_bricks")
-        # _add_room_partitions 在中心 (cx=6, y, cz=6) 设 mat_wall=stone_bricks，
-        # 覆盖 support_columns 的 chiseled_stone_bricks → 出现 stone_bricks 即证明隔墙生效
-        assert s.blocks[idx(6, 3, 6)] == stone_idx, "中心应有隔墙（stone_bricks）"
-
-    def test_furniture_generated(self):
-        desc = _make_desc(height=8, width=8, length=8,
-                          features=[
-                              BuildingFeature(feature_type="furniture"),
-                              BuildingFeature(feature_type="roof", position="flat"),
-                          ])
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
-        andesite_idx = s.palette.index("minecraft:polished_andesite")
-        # _add_furniture 椅腿 (cx=4, table_y+1=2, cz=4) = polished_andesite
-        assert s.blocks[idx(4, 2, 4)] == andesite_idx, "中心应有家具椅腿（polished_andesite）"
-
-    def test_interior_all_features(self):
-        desc = _make_desc(height=12, width=10, length=12,
-                          features=[
-                              BuildingFeature(feature_type="stairs"),
-                              BuildingFeature(feature_type="room"),
-                              BuildingFeature(feature_type="furniture"),
-                              BuildingFeature(feature_type="roof", position="flat"),
-                          ])
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        idx = lambda x, y, z: x + y * s.size_x + z * s.size_x * s.size_y
-        andesite_idx = s.palette.index("minecraft:polished_andesite")
-        # 家具椅腿在 (cx=5, 2, cz=6) = polished_andesite（联调三种 interior 仍生效）
-        assert s.blocks[idx(5, 2, 6)] == andesite_idx, "三件套联调时家具椅腿仍应为 polished_andesite"
-
-
-class TestWikipediaDepth:
-    """测试 Wikipedia 深度利用相关字段。"""
-
-    def test_bays_field_stored(self):
-        from src.models.building import BuildingDescription
-        desc = BuildingDescription(
-            minecraft_version=MinecraftVersion.JAVA_1_20,
-            building_type="gate",
-            height=8, width=12, length=6,
-            bays=5,
+class TestCurveRendering:
+    def test_cylinder_curve(self):
+        dsl = _make_dsl(
+            width=10, length=10, height=10,
+            curves=[CurveSpec(type="cylinder", radius=3, height=8,
+                              center_x=5, center_y=0, center_z=5,
+                              material="stone_bricks")],
         )
-        assert desc.bays == 5
+        s = BlockBuilder(dsl).build()
+        # 圆柱中心应有
+        assert _idx(s, 5, 4, 5) != s.palette.index("minecraft:air")
 
-    def test_columns_field_parsed(self):
-        from src.generator.block_builder import BlockBuilder
-        desc = _make_desc(
-            features=[
-                BuildingFeature(feature_type="column", count=4),
-                BuildingFeature(feature_type="roof", position="flat"),
-            ],
+    def test_dome_curve(self):
+        dsl = _make_dsl(
+            width=10, length=10, height=10,
+            curves=[CurveSpec(type="dome", radius=4, height=4,
+                              center_x=5, center_y=6, center_z=5,
+                              material="white_concrete")],
         )
-        builder = BlockBuilder(desc)
-        s = builder.build()
-        assert len(s.blocks) > 0
+        s = BlockBuilder(dsl).build()
+        # 穹顶中心应有
+        assert _idx(s, 5, 7, 5) != s.palette.index("minecraft:air")
 
-    def test_roof_style_from_wikipedia(self):
-        desc = _make_desc(
-            roof="xieshan",
-            features=[BuildingFeature(feature_type="roof", position="xieshan")],
+    def test_arch_curve(self):
+        dsl = _make_dsl(
+            width=10, length=10, height=10,
+            curves=[CurveSpec(type="arch", width=4, height=4, curve_radius=2,
+                              center_x=5, center_z=0, arch_type="semicircle",
+                              material="quartz_block")],
         )
-        s = BlockBuilder(desc).build()
-        assert len(s.blocks) > 0
+        s = BlockBuilder(dsl).build()
+        # 拱应有方块
+        assert len(s.blocks) == 10 * 10 * 10
 
-    def test_arch_curve_places_blocks(self):
-        desc = _make_desc(roof="flat")
-        builder = BlockBuilder(desc)
-        builder._grid = [
-            [[builder._idx("air") for _ in range(builder.w)] for _ in range(builder.h)]
-            for _ in range(builder.l)
-        ]
-        builder._arch_curve(4, 4, 3, 1, 4, "stone_bricks")
-        w, h, l = builder.w, builder.h, builder.l
-        grid = [builder._grid[z][y][x] for z in range(l) for y in range(h) for x in range(w)]
-        pal = builder._palette_list
-        idx = lambda x, y, z: x + y * w + z * w * h
-        # 拱顶 (x=4, y=1+4=5)
-        assert pal[grid[idx(4, 5, 4)]] == "minecraft:stone_bricks"
+    def test_flying_eaves_curve(self):
+        dsl = _make_dsl(
+            width=10, length=10, height=8,
+            roof=RoofSpec(type="chinese_roof", height=3),
+            curves=[CurveSpec(type="flying_eaves", direction="up", curvature=0.8,
+                              material="red_terracotta")],
+        )
+        s = BlockBuilder(dsl).build()
+        # 飞檐不崩即可
+        assert len(s.blocks) == 10 * 10 * 8
+
+
+class TestMaterialResolution:
+    def test_global_materials_used(self):
+        dsl = _make_dsl(
+            width=6, length=6, height=4,
+            wall_material="white_concrete",
+            components=[Component(name="main", shape="box", width=4, length=4, height=3,
+                                  position="center")],
+        )
+        s = BlockBuilder(dsl).build()
+        wc_idx = s.palette.index("minecraft:white_concrete")
+        assert _idx(s, 3, 1, 3) == wc_idx
+
+    def test_component_material_overrides_global(self):
+        dsl = _make_dsl(
+            width=6, length=6, height=4,
+            wall_material="white_concrete",
+            components=[Component(name="main", shape="box", width=4, length=4, height=3,
+                                  position="center", material="red_concrete")],
+        )
+        s = BlockBuilder(dsl).build()
+        rc_idx = s.palette.index("minecraft:red_concrete")
+        assert _idx(s, 3, 1, 3) == rc_idx
+
+    def test_window_glass_material(self):
+        dsl = _make_dsl(
+            width=10, length=8, height=8,
+            window_glass_material="blue_stained_glass",
+            windows=WindowSystem(items=[
+                WindowItem(shape="square", floor=1, side="front",
+                           x=0.5, width=0.2, height=2, y_offset=1),
+            ]),
+        )
+        s = BlockBuilder(dsl).build()
+        bsg_idx = s.palette.index("minecraft:blue_stained_glass")
+        assert _idx(s, 4, 2, 0) == bsg_idx
+
+
+class TestDetailScale:
+    def test_detail_scale_doubles_size(self):
+        dsl = _make_dsl(width=5, length=5, height=5, detail_scale=2)
+        s = BlockBuilder(dsl).build()
+        # detail_scale=2 → 5*2=10
+        assert s.size_x == 10
+        assert s.size_y == 10
+        assert s.size_z == 10

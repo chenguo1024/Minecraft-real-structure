@@ -14,7 +14,7 @@ from src.analysis.enhanced_analyzer import analyze as enhanced_analyze
 from src.analysis.mock_analyzer import analyze as mock_analyze
 from src.exporter.nbt_exporter import export as export_nbt
 from src.generator.block_builder import BlockBuilder
-from src.models.building import MinecraftVersion, BuildingFeature
+from src.models.building import BuildingDSL, MinecraftVersion
 
 HERE = Path(__file__).resolve().parent
 TEMPLATES_DIR = HERE / "templates"
@@ -23,14 +23,14 @@ UPLOAD_DIR = Path("data/uploads")
 STRUCTURES_DIR = Path("data/structures")
 MINECRAFT_STRUCTURES_DIR = Path("D:/Plain Craft Launcher 2/.minecraft/versions/1.20/saves/新的世界/generated/minecraft/structures")
 
-app = FastAPI(title="Minecraft Real Structure", version="1.0.1")
+app = FastAPI(title="Minecraft Real Structure", version="1.2.0")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # 进度跟踪：task_id → progress dict
-# 描述存储：task_id → BuildingDescription (用于重新生成)
+# 描述存储：task_id → BuildingDSL (用于重新生成)
 # 结果存储：task_id → dict (用于异步进度流)
 progress_store: dict[str, dict] = {}
-desc_store: dict[str, BuildingDescription] = {}
+desc_store: dict[str, BuildingDSL] = {}
 result_store: dict[str, dict] = {}
 
 
@@ -72,7 +72,6 @@ async def get_result(task_id: str):
 def _run_analysis(task_id: str, image_paths: list[str],
                   mc_version: MinecraftVersion, api_key: str | None) -> None:
     """后台运行分析（同步函数，在 BackgroundTasks 中执行）。"""
-    import asyncio
     try:
         set_progress(task_id, "analyze", 20, "AI 分析建筑照片...")
         if api_key:
@@ -97,10 +96,8 @@ def _run_analysis(task_id: str, image_paths: list[str],
         except Exception:
             pass
 
-        roof_type = "flat"
-        for f in desc.features:
-            if f.feature_type == "roof" and f.position:
-                roof_type = f.position
+        # V2: roof_type 直接从 desc.roof.type 读
+        roof_type = desc.roof.type
 
         desc_store[task_id] = desc
         result_store[task_id] = dict(
@@ -222,10 +219,8 @@ async def analyze(
             "download_url": f"/download/{nbt_filename}",
         }
 
-    roof_type = "flat"
-    for f in desc.features:
-        if f.feature_type == "roof" and f.position:
-            roof_type = f.position
+    # V2: roof_type 直接从 desc.roof.type 读
+    roof_type = desc.roof.type
 
     set_progress(task_id, "done", 100, "生成完成")
 
@@ -267,42 +262,39 @@ async def regenerate(
     width: int = Form(...),
     height: int = Form(...),
     length: int = Form(...),
-    floors: int = Form(1),
+    floor_count: int = Form(1),
     detail_scale: int = Form(1),
     style: str = Form("modern"),
     building_type: str = Form("house"),
     roof_type: str = Form("flat"),
+    roof_height: int = Form(0),
+    roof_layers: int = Form(1),
     task_id: str = Form(""),
 ):
-    """根据调整后的参数重新生成。"""
+    """根据调整后的参数重新生成（V2 BuildingDSL）。"""
     try:
         # 尝试复用原始 AI 分析结果
         original_desc = desc_store.get(task_id)
-
-        from src.analysis.mock_analyzer import analyze as mock_analyze
 
         if original_desc:
             desc = original_desc.model_copy(deep=True)
         else:
             desc = mock_analyze("dummy.jpg", MinecraftVersion.JAVA_1_20)
 
+        # V2: 直接改 BuildingDSL 字段
         desc.height = max(1, min(height, 128))
         desc.width = max(1, min(width, 128))
         desc.length = max(1, min(length, 128))
-        desc.floors = max(1, floors)
+        desc.floor_count = max(1, floor_count)
         desc.detail_scale = max(1, min(detail_scale, 8))
         desc.style = style
         desc.building_type = building_type
 
-        # Override roof type
-        found_roof = False
-        for f in desc.features:
-            if f.feature_type == "roof":
-                f.position = roof_type
-                found_roof = True
-                break
-        if not found_roof:
-            desc.features.append(BuildingFeature(feature_type="roof", position=roof_type))
+        # V2: 屋顶直接改 roof spec
+        desc.roof.type = roof_type
+        if roof_height > 0:
+            desc.roof.height = roof_height
+        desc.roof.layer_count = max(1, roof_layers)
 
         builder = BlockBuilder(desc)
         structure = builder.build()
@@ -310,7 +302,6 @@ async def regenerate(
         nbt_filename = f"{task_id or uuid.uuid4().hex[:12]}.nbt"
         nbt_path = STRUCTURES_DIR / nbt_filename
         STRUCTURES_DIR.mkdir(parents=True, exist_ok=True)
-        from src.exporter.nbt_exporter import export as export_nbt
         export_nbt(structure, nbt_path, MinecraftVersion.JAVA_1_20)
 
         try:

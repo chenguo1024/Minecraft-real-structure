@@ -1,8 +1,29 @@
-from .building import BuildingDescription, MinecraftVersion, BlockMaterial, BuildingFeature
+from .building import (
+    BuildingDSL,
+    BlockMaterial,
+    Component,
+    CurveSpec,
+    EntranceSpec,
+    GeometryRef,
+    MinecraftVersion,
+    PillarSpec,
+    RoofSpec,
+    WallSpec,
+    WindowItem,
+    WindowSystem,
+)
 
 __all__ = [
-    "BuildingDescription",
-    "MinecraftVersion",
+    "BuildingDSL",
     "BlockMaterial",
-    "BuildingFeature",
+    "Component",
+    "CurveSpec",
+    "EntranceSpec",
+    "GeometryRef",
+    "MinecraftVersion",
+    "PillarSpec",
+    "RoofSpec",
+    "WallSpec",
+    "WindowItem",
+    "WindowSystem",
 ]

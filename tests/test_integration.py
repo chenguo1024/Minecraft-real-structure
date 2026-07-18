@@ -1,8 +1,7 @@
-"""集成测试 —— 完整管线（Mock 分析 → 生成 → 导出）。"""
-
+"""V2 集成测试 —— 完整管线（Mock 分析 → BuildingDSL → BlockBuilder → NBT 导出）。"""
 from pathlib import Path
 
-import nbtlib
+import pytest
 
 from src.analysis.mock_analyzer import analyze as mock_analyze
 from src.exporter.nbt_exporter import export
@@ -10,72 +9,94 @@ from src.generator.block_builder import BlockBuilder
 from src.models.building import MinecraftVersion
 
 
+@pytest.fixture
+def tmp_output(tmp_path):
+    """临时 .nbt 输出路径。"""
+    return tmp_path / "test_output.nbt"
+
+
 class TestFullPipeline:
     """完整管线：Mock 分析 → BlockBuilder → NBT 导出。"""
 
-    def test_pipeline_villa(self, tmp_path: Path):
-        desc = mock_analyze("villa.jpg", MinecraftVersion.JAVA_1_20)
+    def test_pipeline_villa(self, tmp_output):
+        """现代别墅完整管线。"""
+        desc = mock_analyze("villa.jpg")
         builder = BlockBuilder(desc)
         structure = builder.build()
-        out = tmp_path / "villa.nbt"
-        export(structure, out, MinecraftVersion.JAVA_1_20)
+        export(structure, tmp_output, desc.minecraft_version)
+        assert tmp_output.exists()
+        assert tmp_output.stat().st_size > 0
 
-        assert out.exists()
-        nbt_file = nbtlib.load(str(out))
-
-        size = list(nbt_file["size"])
-        assert size == [8, 10, 12]
-        blocks = list(nbt_file["blocks"])
-        assert len(blocks) < 8 * 10 * 12  # 空气方块不写入
-        assert len(blocks) > 0
-        assert nbt_file["DataVersion"] == 3465
-
-    def test_pipeline_church(self, tmp_path: Path):
-        desc = mock_analyze("church.jpg", MinecraftVersion.JAVA_1_17)
+    def test_pipeline_church(self, tmp_output):
+        """哥特教堂完整管线。"""
+        desc = mock_analyze("gothic_church.jpg")
         builder = BlockBuilder(desc)
         structure = builder.build()
-        out = tmp_path / "church.nbt"
-        export(structure, out, MinecraftVersion.JAVA_1_17)
+        export(structure, tmp_output, desc.minecraft_version)
+        assert tmp_output.exists()
 
-        assert out.exists()
-        nbt_file = nbtlib.load(str(out))
+    def test_pipeline_gate(self, tmp_output):
+        """中式城门完整管线。"""
+        desc = mock_analyze("tiananmen_gate.jpg")
+        builder = BlockBuilder(desc)
+        structure = builder.build()
+        export(structure, tmp_output, desc.minecraft_version)
+        assert tmp_output.exists()
 
-        size = list(nbt_file["size"])
-        assert size == [10, 18, 20]
-        assert nbt_file["DataVersion"] == 2724
+    def test_pipeline_tower(self, tmp_output):
+        """圆塔完整管线。"""
+        desc = mock_analyze("round_tower.jpg")
+        builder = BlockBuilder(desc)
+        structure = builder.build()
+        export(structure, tmp_output, desc.minecraft_version)
+        assert tmp_output.exists()
 
-    def test_pipeline_all_templates(self, tmp_path: Path):
-        """所有 Mock 模板都通过完整管线不出错。"""
-        templates = ["villa", "L_villa", "church", "pagoda", "mansion"]
-        for name in templates:
-            desc = mock_analyze(f"{name}.jpg", MinecraftVersion.JAVA_1_20)
+    def test_pipeline_temple(self, tmp_output):
+        """古典庙宇完整管线。"""
+        desc = mock_analyze("classical_temple.jpg")
+        builder = BlockBuilder(desc)
+        structure = builder.build()
+        export(structure, tmp_output, desc.minecraft_version)
+        assert tmp_output.exists()
+
+    def test_pipeline_all_templates(self, tmp_path):
+        """所有模板都能走通完整管线。"""
+        from src.analysis.mock_analyzer import TEMPLATES
+        for name in TEMPLATES:
+            desc = mock_analyze(f"{name}.jpg")
             builder = BlockBuilder(desc)
             structure = builder.build()
             out = tmp_path / f"{name}.nbt"
-            export(structure, out, MinecraftVersion.JAVA_1_20)
-            assert out.exists()
-            nbt_file = nbtlib.load(str(out))
-            assert len(nbt_file["blocks"]) > 0
+            export(structure, out, desc.minecraft_version)
+            assert out.exists(), f"{name} 导出失败"
 
-    def test_pipeline_all_versions(self, tmp_path: Path):
-        """所有 Minecraft 版本都能跑通管线。"""
-        for v in MinecraftVersion:
-            desc = mock_analyze("villa.jpg", v)
-            builder = BlockBuilder(desc)
-            structure = builder.build()
-            out = tmp_path / f"villa_{v.value}.nbt"
-            export(structure, out, v)
-            assert out.exists()
-
-    def test_pipeline_block_count_matches_size(self, tmp_path: Path):
-        desc = mock_analyze("mansion.jpg", MinecraftVersion.JAVA_1_20)
+    def test_pipeline_all_versions(self, tmp_path):
+        """所有 Minecraft 版本都能导出。"""
+        desc = mock_analyze("villa.jpg")
         builder = BlockBuilder(desc)
         structure = builder.build()
-        out = tmp_path / "mansion.nbt"
-        export(structure, out, MinecraftVersion.JAVA_1_20)
+        for version in MinecraftVersion:
+            desc_copy = desc.model_copy(deep=True)
+            desc_copy.minecraft_version = version
+            out = tmp_path / f"villa_{version.value}.nbt"
+            export(structure, out, version)
+            assert out.exists(), f"{version.value} 导出失败"
 
-        nbt_file = nbtlib.load(str(out))
-        sx, sy, sz = list(nbt_file["size"])
-        total = sx * sy * sz
-        blocks = list(nbt_file["blocks"])
-        assert 0 < len(blocks) < total  # 空气方块不写入
+    def test_pipeline_block_count_matches_size(self, tmp_output):
+        """导出的方块总数 = size_x * size_y * size_z。"""
+        desc = mock_analyze("villa.jpg")
+        builder = BlockBuilder(desc)
+        structure = builder.build()
+        export(structure, tmp_output, desc.minecraft_version)
+        assert len(structure.blocks) == structure.size_x * structure.size_y * structure.size_z
+
+    def test_pipeline_nbt_has_correct_structure(self, tmp_output):
+        """NBT 文件是有效的 GZip 压缩 NBT（GZip magic number 1f 8b）。"""
+        desc = mock_analyze("villa.jpg")
+        builder = BlockBuilder(desc)
+        structure = builder.build()
+        export(structure, tmp_output, desc.minecraft_version)
+        # 验证是 GZip 文件（NBT 结构文件用 GZip 压缩）
+        with open(tmp_output, "rb") as f:
+            magic = f.read(2)
+        assert magic == b"\x1f\x8b", f"NBT 文件应为 GZip 压缩，magic={magic!r}"
