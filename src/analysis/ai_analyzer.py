@@ -927,4 +927,30 @@ def analyze(
             break
         prev_score = s
 
+    # ── 模板兜底：评分仍然很低时用模板填充 ──
+    if s < 30:
+        try:
+            from src.analysis.templates import get_template
+            template_dsl = get_template(
+                style=dsl.style,
+                building_type=dsl.building_type,
+                width=dsl.width,
+                length=dsl.length,
+                height=dsl.height,
+                floor_count=dsl.floor_count,
+                detail_scale=dsl.detail_scale,
+            )
+            # 保留 AI 分析中仍然有用的字段（名称/位置/关键词/description）
+            template_dsl.building_name = dsl.building_name
+            template_dsl.location = dsl.location
+            template_dsl.keywords = dsl.keywords
+            template_dsl.description = dsl.description
+            template_dsl.decorations_description = dsl.decorations_description
+            template_dsl.minecraft_version = version
+            dsl = template_dsl
+            _fix(dsl)
+            __import__("logging").debug(f"模板兜底: style={dsl.style}, type={dsl.building_type}")
+        except Exception:
+            pass  # 模板加载失败也不影响正常流程
+
     return dsl

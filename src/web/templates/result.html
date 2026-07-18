@@ -217,6 +217,30 @@
         </form>
       </section>
 
+      <!-- AI 修正反馈 -->
+      <section class="card card-wide" style="margin-top:20px;">
+        <h2 style="cursor:pointer;user-select:none;" onclick="toggleAiRefine()">
+          🤖 AI 修正反馈 <span id="ai-toggle-icon" style="float:right;font-size:0.8em;">▼</span>
+        </h2>
+        <p style="color:var(--muted);font-size:0.85rem;margin-bottom:0.75rem;">
+          告诉 AI 生成结果哪里不对，AI 将自动修正并重新生成。例如：「高度太低」「缺门廊」「颜色不对」。
+        </p>
+        <div id="ai-refine" class="hidden">
+          <form id="aiRefineForm" action="/ai-refine" method="post" class="ai-refine-form">
+            <input type="hidden" name="task_id" value="{{ task_id }}">
+            <input type="hidden" name="dsl_json" id="aiRefineDslJson">
+            <label style="font-size:0.9rem;display:block;margin-bottom:0.4rem;">反馈描述</label>
+            <textarea id="aiFeedback" name="user_feedback" rows="4"
+              placeholder="请描述生成结果哪里需要修正，例如：&#10;- 高度太低，应该再加一层&#10;- 缺少门廊和台阶&#10;- 屋顶颜色不对，应该用红色"
+              style="width:100%;font-family:inherit;font-size:0.88rem;background:#0d1117;color:var(--text);padding:0.75rem;border-radius:6px;border:1px solid var(--border);resize:vertical;margin-bottom:0.75rem;"></textarea>
+            <label style="font-size:0.9rem;display:block;margin-bottom:0.4rem;">API Key</label>
+            <input type="password" id="refineApiKey" name="api_key" placeholder="输入你的 AI API Key（如 OpenAI、Claude 等）"
+              style="width:100%;font-family:inherit;font-size:0.88rem;background:#0d1117;color:var(--text);padding:0.6rem 0.75rem;border-radius:6px;border:1px solid var(--border);margin-bottom:0.75rem;box-sizing:border-box;">
+            <button type="submit" class="btn btn-primary">提交 AI 修正</button>
+          </form>
+        </div>
+      </section>
+
       <!-- 高级 DSL 编辑器 -->
       <section class="card card-wide" style="margin-top:20px;">
         <h2 style="cursor:pointer;user-select:none;" onclick="toggleDslEditor()">
@@ -289,6 +313,24 @@ function formatDslJson() {
     dslStatus.innerHTML = '<span style="color:#e94560;">✗ JSON 格式错误: ' + e.message + '</span>';
   }
 }
+
+// ── AI 修正反馈逻辑 ──
+function toggleAiRefine() {
+  var el = document.getElementById('ai-refine');
+  var icon = document.getElementById('ai-toggle-icon');
+  if (el.classList.contains('hidden')) {
+    el.classList.remove('hidden');
+    icon.textContent = '▲';
+  } else {
+    el.classList.add('hidden');
+    icon.textContent = '▼';
+  }
+}
+
+// 提交前将当前 DSL JSON 写入隐藏字段
+document.getElementById('aiRefineForm').addEventListener('submit', function(e) {
+  document.getElementById('aiRefineDslJson').value = dslTextarea.value;
+});
 
 // 提交前验证 JSON
 document.getElementById('dslForm').addEventListener('submit', function(e) {

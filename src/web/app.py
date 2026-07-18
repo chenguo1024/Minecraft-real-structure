@@ -348,6 +348,107 @@ async def regenerate_dsl(
         return _render("error.html", error=str(e), detail=tb)
 
 
+@app.post("/ai-refine")
+async def ai_refine(
+    request: Request,
+    task_id: str = Form(...),
+    user_feedback: str = Form(""),
+    api_key: str | None = Form(None),
+    dsl_json: str = Form(""),
+):
+    """AI 视觉反馈修正：用户描述问题，AI 重新生成修正后的 DSL。
+
+    流程：
+      1. 加载原始 DSL
+      2. 将 DSL JSON + 用户反馈 + 当前 3D 参数发给 AI
+      3. AI 返回修正后的 DSL
+      4. 自动校验 + 修正 → 生成新结构
+    """
+    try:
+        # 加载原始 DSL
+        original_desc = desc_store.get(task_id)
+        if not original_desc:
+            # 尝试从提交的 DSL JSON 反序列化
+            if dsl_json:
+                raw = json.loads(dsl_json)
+                original_desc = BuildingDSL(**raw)
+            else:
+                raise HTTPException(status_code=400, detail="找不到原始分析结果")
+
+        # 获取 API Key
+        if not api_key:
+            import os
+            api_key = os.environ.get("ZHIPU_API_KEY", "")
+        if not api_key:
+            raise HTTPException(status_code=400, detail="需要 API Key 才能使用 AI 修正")
+
+        # 构造 AI 修正请求
+        from src.analysis.ai_analyzer import (
+            _refine_with_feedback, _parse_building_dsl, _encode_image,
+        )
+        from src.analysis.dsl_validator import validate as _validate, \
+            score as _score, fix as _fix
+        from pathlib import Path
+
+        # 查找原始图片
+        image_path = None
+        upload_dir = Path("data/uploads")
+        for f in upload_dir.glob(f"{task_id}_*"):
+            image_path = str(f)
+            break
+
+        if image_path:
+            image_data, mime = _encode_image(image_path)
+            errors = _validate(original_desc)
+            s, reasons = _score(original_desc)
+            # 构造反馈错误列表
+            feedback_errors = list(errors)
+            if user_feedback:
+                feedback_errors.append(f"用户反馈: {user_feedback}")
+
+            refined_raw = _refine_with_feedback(
+                api_key, image_data, mime,
+                original_desc, feedback_errors, s, reasons,
+            )
+            if refined_raw:
+                desc = _parse_building_dsl(refined_raw, original_desc.minecraft_version)
+            else:
+                desc = original_desc.model_copy(deep=True)
+        else:
+            # 没有图片，直接应用用户反馈调整
+            desc = original_desc.model_copy(deep=True)
+            if user_feedback:
+                desc.description += f"\n\n用户反馈修正: {user_feedback}"
+
+        _fix(desc)
+
+        builder = BlockBuilder(desc)
+        structure = builder.build()
+
+        nbt_filename = f"{task_id}_refined.nbt"
+        nbt_path = STRUCTURES_DIR / nbt_filename
+        STRUCTURES_DIR.mkdir(parents=True, exist_ok=True)
+        export_nbt(structure, nbt_path, desc.minecraft_version)
+
+        try:
+            mc_path = MINECRAFT_STRUCTURES_DIR / nbt_filename
+            MINECRAFT_STRUCTURES_DIR.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(nbt_path), str(mc_path))
+        except Exception:
+            pass
+
+        desc_store[task_id] = desc
+        ctx = _build_result_context(desc, structure, task_id, f"/download/{nbt_filename}")
+        if user_feedback:
+            ctx["refine_feedback"] = user_feedback
+        return _render("result.html", **ctx)
+    except HTTPException:
+        raise
+    except Exception as e:
+        tb = traceback.format_exc()
+        return _render("error.html", error=str(e), detail=tb)
+
+
 @app.get("/download/{filename}")
 async def download(filename: str):
     file_path = STRUCTURES_DIR / filename

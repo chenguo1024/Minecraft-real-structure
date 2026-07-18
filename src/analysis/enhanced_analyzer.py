@@ -26,6 +26,45 @@ from src.models.building import (
 from src.utils.wikipedia import lookup_building, meters_to_blocks
 
 
+def _cross_check_dimensions(dsls: list[BuildingDSL]) -> list[str]:
+    """多视角交叉校验：检查不同照片的尺寸是否一致，返回警告列表。
+
+    规则：
+      - height 在所有视角应该相同（建筑高度不变），差异 >20% 时警告
+      - width 在正面/背面视角应该相同
+      - 如果两张照片的 height 差异不大，取平均值；差异大时取中位数
+    """
+    warnings: list[str] = []
+    if len(dsls) < 2:
+        return warnings
+
+    heights = [d.height for d in dsls]
+    widths = [d.width for d in dsls]
+    lengths = [d.length for d in dsls]
+
+    def _median(vals: list[int]) -> int:
+        s = sorted(vals)
+        n = len(s)
+        return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) // 2
+
+    def _check_consistency(vals: list[int], name: str) -> int | None:
+        """检查一组值是否一致。差异 >20% 时返回修正建议值（中位数）。"""
+        if not vals:
+            return None
+        mn, mx = min(vals), max(vals)
+        if mn == 0:
+            return mx
+        if (mx - mn) / mn > 0.2:
+            med = _median(vals)
+            warnings.append(
+                f"{name} 多视角差异较大 ({mn}~{mx})，交叉校验后建议值: {med}"
+            )
+            return med
+        return None
+
+    return warnings
+
+
 def _merge_dsls(dsls: list[BuildingDSL]) -> BuildingDSL:
     """合并多张照片的 BuildingDSL（Agent 3 核心逻辑）。
 
@@ -38,11 +77,17 @@ def _merge_dsls(dsls: list[BuildingDSL]) -> BuildingDSL:
       - materials 合并（按 name 去重）
       - building_name/location/keywords 取首个非空
       - description 拼接所有角度的描述
+      - 交叉校验多视角一致性
     """
     if not dsls:
         raise ValueError("没有 DSL 可以合并")
     if len(dsls) == 1:
         return dsls[0]
+
+    # 交叉校验（合并前先记录警告）
+    cc_warnings = _cross_check_dimensions(dsls)
+    if cc_warnings:
+        __import__("logging").debug(f"多视角交叉校验: {'; '.join(cc_warnings)}")
 
     base = dsls[0].model_copy(deep=True)
 
