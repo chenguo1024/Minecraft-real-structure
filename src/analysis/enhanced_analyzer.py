@@ -275,4 +275,8 @@ def analyze(
     # 4. 用 Wikipedia 数据校准
     result = _apply_wikipedia_data(merged, wiki_data)
 
+    # 5. 最终自动修正边界问题（Wikipedia 可能改出超尺寸值）
+    from src.analysis.dsl_validator import fix as _fix
+    _fix(result)
+
     return result

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import uuid
 import traceback
@@ -10,6 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
 
+from src.analysis.dsl_validator import fix as dsl_fix
 from src.analysis.enhanced_analyzer import analyze as enhanced_analyze
 from src.analysis.mock_analyzer import analyze as mock_analyze
 from src.exporter.nbt_exporter import export as export_nbt
@@ -42,6 +44,28 @@ def set_progress(task_id: str, step: str, pct: int, message: str) -> None:
 async def get_progress(task_id: str):
     p = progress_store.get(task_id, {"step": "unknown", "pct": 0, "message": "无进度信息"})
     return p
+
+
+def _build_result_context(
+    desc: BuildingDSL,
+    structure,
+    task_id: str,
+    download_url: str,
+) -> dict:
+    """构建 result.html 渲染所需的完整上下文。"""
+    return dict(
+        desc=desc,
+        dsl_json=json.dumps(desc.model_dump(), ensure_ascii=False, indent=2),
+        block_total=len(structure.blocks),
+        size_x=structure.size_x,
+        size_y=structure.size_y,
+        size_z=structure.size_z,
+        palette=structure.palette,
+        blocks_json=structure.blocks,
+        roof_type=desc.roof.type,
+        task_id=task_id,
+        download_url=download_url,
+    )
 
 
 def _render(name: str, **context) -> HTMLResponse:
@@ -96,22 +120,9 @@ def _run_analysis(task_id: str, image_paths: list[str],
         except Exception:
             pass
 
-        # V2: roof_type 直接从 desc.roof.type 读
-        roof_type = desc.roof.type
-
         desc_store[task_id] = desc
-        result_store[task_id] = dict(
-            desc=desc,
-            block_total=len(structure.blocks),
-            size_x=structure.size_x,
-            size_y=structure.size_y,
-            size_z=structure.size_z,
-            palette=structure.palette,
-            blocks_json=structure.blocks,
-            roof_type=roof_type,
-            task_id=task_id,
-            download_url=f"/download/{nbt_filename}",
-        )
+        ctx = _build_result_context(desc, structure, task_id, f"/download/{nbt_filename}")
+        result_store[task_id] = ctx
         set_progress(task_id, "done", 100, "生成完成")
     except Exception as e:
         progress_store[task_id] = {"step": "error", "pct": -1, "message": str(e)}
@@ -219,41 +230,16 @@ async def analyze(
             "download_url": f"/download/{nbt_filename}",
         }
 
-    # V2: roof_type 直接从 desc.roof.type 读
-    roof_type = desc.roof.type
-
     set_progress(task_id, "done", 100, "生成完成")
 
     # 存储描述用于后续重新生成
     desc_store[task_id] = desc
 
     # 存储结果用于异步流
-    result_store[task_id] = dict(
-        desc=desc,
-        block_total=len(structure.blocks),
-        size_x=structure.size_x,
-        size_y=structure.size_y,
-        size_z=structure.size_z,
-        palette=structure.palette,
-        blocks_json=structure.blocks,
-        roof_type=roof_type,
-        task_id=task_id,
-        download_url=f"/download/{nbt_filename}",
-    )
+    ctx = _build_result_context(desc, structure, task_id, f"/download/{nbt_filename}")
+    result_store[task_id] = ctx
 
-    return _render(
-        "result.html",
-        desc=desc,
-        block_total=len(structure.blocks),
-        size_x=structure.size_x,
-        size_y=structure.size_y,
-        size_z=structure.size_z,
-        palette=structure.palette,
-        blocks_json=structure.blocks,
-        roof_type=roof_type,
-        task_id=task_id,
-        download_url=f"/download/{nbt_filename}",
-    )
+    return _render("result.html", **ctx)
 
 
 @app.post("/regenerate")
@@ -313,19 +299,50 @@ async def regenerate(
 
         roof_type_val = roof_type
 
-        return _render(
-            "result.html",
-            desc=desc,
-            block_total=len(structure.blocks),
-            size_x=structure.size_x,
-            size_y=structure.size_y,
-            size_z=structure.size_z,
-            palette=structure.palette,
-            blocks_json=structure.blocks,
-            roof_type=roof_type_val,
-            task_id=task_id,
-            download_url=f"/download/{nbt_filename}",
-        )
+        ctx = _build_result_context(desc, structure, task_id, f"/download/{nbt_filename}")
+        return _render("result.html", **ctx)
+    except Exception as e:
+        tb = traceback.format_exc()
+        return _render("error.html", error=str(e), detail=tb)
+
+
+@app.post("/regenerate-dsl")
+async def regenerate_dsl(
+    request: Request,
+    dsl_json: str = Form(...),
+    task_id: str = Form(""),
+):
+    """接收用户编辑后的完整 BuildingDSL JSON，校验 → 自动修正 → 重新生成。"""
+    try:
+        raw = json.loads(dsl_json)
+
+        # 反序列化为 BuildingDSL（Pydantic 校验）
+        desc = BuildingDSL(**raw)
+
+        # 自动修正边界问题
+        fix_msgs = dsl_fix(desc)
+
+        builder = BlockBuilder(desc)
+        structure = builder.build()
+
+        nbt_filename = f"{task_id or uuid.uuid4().hex[:12]}.nbt"
+        nbt_path = STRUCTURES_DIR / nbt_filename
+        STRUCTURES_DIR.mkdir(parents=True, exist_ok=True)
+        export_nbt(structure, nbt_path, desc.minecraft_version)
+
+        try:
+            mc_path = MINECRAFT_STRUCTURES_DIR / nbt_filename
+            MINECRAFT_STRUCTURES_DIR.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(nbt_path), str(mc_path))
+        except Exception:
+            pass
+
+        # 更新存储
+        desc_store[task_id] = desc
+        ctx = _build_result_context(desc, structure, task_id, f"/download/{nbt_filename}")
+        if fix_msgs:
+            ctx["fix_messages"] = fix_msgs
+        return _render("result.html", **ctx)
     except Exception as e:
         tb = traceback.format_exc()
         return _render("error.html", error=str(e), detail=tb)

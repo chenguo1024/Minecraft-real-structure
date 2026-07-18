@@ -245,6 +245,20 @@ Minecraft 中 1 方块 ≈ 1 米。用图片中的参照物推算尺寸：
 - 如果只能看到正面，components 至少包含 main_body，其他面可推断
 - 尺寸给不出精确值时根据建筑类型推断合理估算值
 
+=========================================================
+【输出前自检】——在输出 JSON 之前，逐项检查：
+=========================================================
+1. 所有 width/length/height 是否在 1~256 范围内
+2. components 中每个组件的 offset + 自身尺寸 不超出总 width/length/height
+3. roof.height 合理（不超过总 height 的一半）
+4. windows 中每个 item 的 floor 值不超过 floor_count
+5. entrance.width 小于 building.width，entrance.height 小于 building.height
+6. 所有 material 字段（components[].material、roof.material、walls[].material、
+   各部位材质等）都是**字符串**，不是对象/字典
+7. components 列表至少包含 1 个元素（main_body）
+8. materials 列表至少包含 3 种材料
+9. 不要输出空字符串的 components（width/height/length 全为 0 的要删掉）
+
 只输出 JSON，不要输出其他内容。"""
 
 
@@ -759,25 +773,158 @@ def _extract_content(result: dict) -> dict:
         raise
 
 
+def _refine_with_feedback(
+    api_key: str,
+    image_data: str,
+    mime: str,
+    original_dsl: BuildingDSL,
+    errors: list[str],
+    score: int = 0,
+    score_reasons: list[str] | None = None,
+) -> dict | None:
+    """带错误反馈的二次分析：把第一轮结果 + 错误描述回传给 AI 修正。
+
+    返回修正后的 raw dict，失败时返回 None。
+
+    Args:
+        api_key: 智谱 API Key
+        image_data: base64 图片数据
+        mime: 图片 MIME 类型
+        original_dsl: 上一次分析得到的 DSL
+        errors: 校验器发现的错误列表
+        score: 当前置信度分数
+        score_reasons: 评分扣分原因
+    """
+    import time
+    # 把 DSL 序列化为 JSON 字符串
+    dsl_json = original_dsl.model_dump_json(indent=2)
+    error_text = "\n".join(f"  - {e}" for e in errors)
+
+    refine_prompt_parts = [
+        f"你上一次分析的结果是：\n{dsl_json}\n\n",
+        f"当前质量评分: {score}/100\n",
+        f"校验器发现了以下问题：\n{error_text}\n\n",
+    ]
+    if score_reasons:
+        reason_text = "\n".join(f"  - {r}" for r in score_reasons)
+        refine_prompt_parts.append(f"评分扣分原因：\n{reason_text}\n\n")
+    refine_prompt_parts.append(
+        "请修正上述所有问题，重新输出完整的 JSON。只输出修正后的 JSON，不要输出其他内容。"
+    )
+    refine_prompt = "".join(refine_prompt_parts)
+
+    url = f"{ZHIPU_BASE_URL}chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": ZHIPU_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime};base64,{image_data}"}
+                    },
+                    {"type": "text", "text": refine_prompt}
+                ]
+            }
+        ],
+        "max_tokens": 8192,
+        "temperature": 0.1,
+    }
+
+    for attempt in range(3):
+        try:
+            with httpx.Client(timeout=90.0) as client:
+                response = client.post(url, headers=headers, json=payload)
+                if response.status_code == 429:
+                    time.sleep(2 * (attempt + 1))
+                    continue
+                response.raise_for_status()
+                result = response.json()
+                return _extract_content(result)
+        except Exception:
+            if attempt < 2:
+                time.sleep(1)
+                continue
+            return None
+
+
 def analyze(
     image_path: str,
     version: MinecraftVersion = MinecraftVersion.JAVA_1_20,
     api_key: str | None = None,
+    max_refine_rounds: int = 3,
 ) -> BuildingDSL:
     """分析建筑图片，返回 BuildingDSL。
+
+    含自动校验和修正闭环（Reflexion 模式）：
+      1. AI 分析 → 解析 → 自动修正 → 校验 + 评分
+      2. 评分低于 50 时触发 AI 修正（把错误 + 评分原因反馈给 AI）
+      3. 多轮迭代（最多 max_refine_rounds 轮），每轮评分不提升则停止
+      4. 最终无论评分如何都应用自动修正后返回
 
     Args:
         image_path: 图片文件路径
         version: 目标 Minecraft 版本
         api_key: 智谱 API Key（None 则从 ZHIPU_API_KEY 环境变量读）
+        max_refine_rounds: 最多 AI 修正轮数（默认 3）
 
     Returns:
         BuildingDSL 建筑逆向工程数据契约
     """
+    from src.analysis.dsl_validator import validate as _validate, \
+        score as _score, fix as _fix
+
     key = api_key or _get_env_key()
     if not key:
         raise ValueError("缺少智谱 API Key，请设置 ZHIPU_API_KEY 环境变量或传 api_key 参数")
 
     image_data, mime = _encode_image(image_path)
+
+    # ── 第一轮分析 ──
     raw = _call_zhipu_api(key, image_data, mime)
-    return _parse_building_dsl(raw, version)
+    dsl = _parse_building_dsl(raw, version)
+
+    # 自动修正
+    fix_msgs = _fix(dsl)
+    if fix_msgs:
+        __import__("logging").debug(f"自动修正: {'; '.join(fix_msgs)}")
+
+    # 校验 + 评分
+    errors = _validate(dsl)
+    s, reasons = _score(dsl)
+
+    # ── 多轮 Reflexion 修正 ──
+    prev_score = s
+    for round_n in range(1, max_refine_rounds + 1):
+        if s >= 50 or not errors:
+            break
+
+        refined_raw = _refine_with_feedback(key, image_data, mime, dsl, errors, s, reasons)
+        if refined_raw is None:
+            __import__("logging").debug(f"第 {round_n} 轮 AI 修正失败（API 超时/限流），终止迭代")
+            break
+
+        dsl = _parse_building_dsl(refined_raw, version)
+        fix_msgs2 = _fix(dsl)
+        if fix_msgs2:
+            __import__("logging").debug(f"第 {round_n} 轮修正: {'; '.join(fix_msgs2)}")
+
+        errors = _validate(dsl)
+        s, reasons = _score(dsl)
+        __import__("logging").debug(f"第 {round_n} 轮评分: {s}/100, 错误数: {len(errors)}")
+
+        # 如果本轮评分没有提升，说明 AI 无法进一步改善，终止迭代
+        if s <= prev_score:
+            __import__("logging").debug(
+                f"第 {round_n} 轮评分未提升 ({prev_score}→{s})，终止迭代"
+            )
+            break
+        prev_score = s
+
+    return dsl

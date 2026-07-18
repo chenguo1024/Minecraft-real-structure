@@ -196,8 +196,9 @@
       {% endif %}
       <a href="/" class="btn btn-secondary">← 再生成一个</a>
 
+      <!-- 快速调参表单（保留旧逻辑） -->
       <section class="card card-wide" style="margin-top:20px;">
-        <h2>手动调整参数</h2>
+        <h2>快速调参</h2>
         <form action="/regenerate" method="post" class="tune-form">
           <input type="hidden" name="task_id" value="{{ task_id }}">
           <div class="tune-grid">
@@ -215,6 +216,35 @@
           <button type="submit" class="btn btn-primary">重新生成</button>
         </form>
       </section>
+
+      <!-- 高级 DSL 编辑器 -->
+      <section class="card card-wide" style="margin-top:20px;">
+        <h2 style="cursor:pointer;user-select:none;" onclick="toggleDslEditor()">
+          高级编辑器 <span id="dsl-toggle-icon" style="float:right;font-size:0.8em;">▼</span>
+        </h2>
+        <p style="color:var(--muted);font-size:0.85rem;margin-bottom:0.75rem;">
+          可编辑完整的 BuildingDSL 数据：组件、屋顶、墙体、窗户、入口、曲线、材质等所有字段。
+        </p>
+        <div id="dsl-editor" class="hidden">
+          <form id="dslForm" action="/regenerate-dsl" method="post" class="dsl-form">
+            <input type="hidden" name="task_id" value="{{ task_id }}">
+            <textarea id="dslJson" name="dsl_json" rows="25"
+              style="width:100%;font-family:monospace;font-size:0.82rem;background:#0d1117;color:#c9d1d9;padding:0.75rem;border-radius:6px;border:1px solid var(--border);resize:vertical;"></textarea>
+            <div id="dsl-status" class="dsl-status" style="margin-top:0.5rem;font-size:0.85rem;"></div>
+            <div style="display:flex;gap:0.75rem;margin-top:0.75rem;">
+              <button type="button" class="btn btn-secondary" onclick="formatDslJson()">格式化 JSON</button>
+              <button type="submit" class="btn btn-primary">修正生成</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      {% if fix_messages %}
+      <div class="alert alert-info" style="margin-top:1rem;">
+        <strong>自动修正记录：</strong><br>
+        {% for m in fix_messages %}{{ loop.index }}. {{ m }}<br>{% endfor %}
+      </div>
+      {% endif %}
     </div>
 
     {% if desc.description %}
@@ -229,5 +259,76 @@
     <p>开源项目 · <a href="https://github.com/chenguo1024/Minecraft-real-structure" target="_blank">GitHub</a></p>
   </footer>
 </div>
+
+<script>
+// ── DSL 编辑器逻辑 ──
+var dslTextarea = document.getElementById('dslJson');
+var dslStatus = document.getElementById('dsl-status');
+
+// 初始化时填充 JSON（使用后端传入的 dsl_json 字符串，JSON.parse 确保正确转义）
+dslTextarea.value = JSON.parse({{ dsl_json | tojson }});
+
+function toggleDslEditor() {
+  var el = document.getElementById('dsl-editor');
+  var icon = document.getElementById('dsl-toggle-icon');
+  if (el.classList.contains('hidden')) {
+    el.classList.remove('hidden');
+    icon.textContent = '▲';
+  } else {
+    el.classList.add('hidden');
+    icon.textContent = '▼';
+  }
+}
+
+function formatDslJson() {
+  try {
+    var obj = JSON.parse(dslTextarea.value);
+    dslTextarea.value = JSON.stringify(obj, null, 2);
+    dslStatus.innerHTML = '<span style="color:#4ac34a;">✓ JSON 格式正确</span>';
+  } catch(e) {
+    dslStatus.innerHTML = '<span style="color:#e94560;">✗ JSON 格式错误: ' + e.message + '</span>';
+  }
+}
+
+// 提交前验证 JSON
+document.getElementById('dslForm').addEventListener('submit', function(e) {
+  try {
+    var obj = JSON.parse(dslTextarea.value);
+    dslStatus.innerHTML = '<span style="color:#4ac34a;">✓ JSON 有效，提交中...</span>';
+  } catch(ex) {
+    e.preventDefault();
+    dslStatus.innerHTML = '<span style="color:#e94560;">✗ JSON 格式错误，无法提交: ' + ex.message + '</span>';
+  }
+});
+</script>
+
+<style>
+.tune-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem 1.5rem;
+}
+.tune-grid label {
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.tune-grid input[type="number"],
+.tune-grid input[type="text"] {
+  flex: 1;
+  background: #0d1117;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  width: 80px;
+}
+.dsl-status { min-height: 1.2em; }
+@media (max-width: 600px) {
+  .tune-grid { grid-template-columns: 1fr; }
+}
+</style>
 </body>
 </html>
